@@ -687,7 +687,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
 (function (root) {
   'use strict';
 
-  var VERSAO = 'contrato-v2.6';
+  var VERSAO = 'contrato-v2.7';
   var FORMAS_LEGUMINOSA = ['seca', 'congelada', 'conserva'];
   var STORAGE_KEY = 'cardapio_v1';
 
@@ -925,7 +925,8 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     estoque_fonte:     { padrao: null, valores: ['foto', 'audio', 'texto', 'nada_novo'] },
     estoque_rascunho:  { padrao: '' },
     versao_semente:    { padrao: 0 },
-    gemini_pago:       { padrao: 'nao', valores: ['sim', 'nao'] } // v2.5: espelho da Script Property GEMINI_PAGO, escrito pelo servidor (R43)
+    gemini_pago:       { padrao: 'nao', valores: ['sim', 'nao'], so_servidor: true } // v2.5: espelho da Script Property GEMINI_PAGO, escrito pelo servidor; informa o nível (ADR-026: não barra função)
+    // so_servidor: true = a op config_definir recusa a chave (entrada_invalida); só o servidor grava (BACKLOG 105)
     // versao_aba_<Aba>: contador por aba, escrito só pelo servidor
   };
 
@@ -1089,16 +1090,27 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     },
     PROPRIEDADES: ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'LLM_MODELO_CLAUDE_FORTE', 'LLM_MODELO_CLAUDE_LEVE',
                    'LLM_ESFORCO', 'LLM_MODELO_GEMINI', 'GEMINI_PAGO', 'PESSOAS_EMAIL', 'OAUTH_CLIENT_ID', 'ALLOWED_EMAILS',
-                   'LLM_MAX_TOKENS_PROPOR'], // v2.6: inteiro 1024-128000; fora disso o servidor usa 16000
-    PADROES: { LLM_MODELO_CLAUDE_FORTE: 'claude-sonnet-5', LLM_MODELO_CLAUDE_LEVE: 'claude-haiku-4-5', LLM_ESFORCO: 'medium',
+                   'LLM_MAX_TOKENS_PROPOR',  // v2.6; v2.7: inteiro 1024-30000 (acima, a conta passa dos 360 s do Apps Script); fora disso o servidor usa 24000
+                   'LLM_ESFORCO_PROPOR',     // v2.7: low|medium|high, vale só para propor_semana; fora disso o servidor usa low
+                   'SESSAO_SEGREDO'],        // v2.7 (S5): gerada pelo próprio servidor na primeira sessão emitida (2 UUIDs); trocar = revogar todas as sessões
+    PADROES: { LLM_MODELO_CLAUDE_FORTE: 'claude-sonnet-5', LLM_MODELO_CLAUDE_LEVE: 'claude-haiku-4-5', LLM_ESFORCO: 'medium', LLM_ESFORCO_PROPOR: 'low',
                LLM_MODELO_GEMINI: 'gemini-3.5-flash-lite', GEMINI_PAGO: 'nao' },
-    GEMINI_GRATUITO_SO: ['ler_foto', 'interpretar_pedido'], // R43: sem faturamento, o Gemini não recebe o plano nem o Livro
+    // ADR-026 (08/10/2026) revoga a R43: o Gemini sem faturamento (GEMINI_PAGO != sim) recebe as 4 funções. A lista GEMINI_GRATUITO_SO
+    // saiu do contrato (com as 4 funções ela não barraria nada); GEMINI_PAGO e Config.gemini_pago seguem como informação de limite e
+    // de termos (custo 0 no gratuito), nunca como permissão.
 
     ERROS: ['desligado', 'sem_chave', 'provedor_nao_aprovado', 'tempo', 'limite', 'recusa', 'esquema', 'rede', 'provedor'],
     // US$ por milhão de tokens [entrada, saída] · fonte: skill claude-api (tabela de 24/06/2026) e working/pesquisa-llms.md (26/09/2026)
     PRECOS_USD_MTOK: { 'claude-sonnet-5': [2, 10], 'claude-haiku-4-5': [1, 5], 'gemini-flash-lite': [0.25, 1.5], 'gemini-3.5-flash-lite': [0.30, 2.50] }, // 3.5: ai.google.dev/gemini-api/docs/pricing (A1, 26/09)
     LIMITE_CELULA: 45000, // caracteres por célula json; o Sheets corta em 50000 · acima disso o servidor recusa (erro entrada_invalida), nunca trunca
     ESQUEMAS: ESQUEMAS, ENTRADAS: ENTRADAS_LLM
+  };
+  // v2.7 (S5 · BACKLOG 115): sessão própria do servidor. A ação autenticada aceita sessao no lugar de idToken.
+  var SESSAO = {
+    CAMPO: 'sessao',                // no corpo do pedido (entrada) e na resposta ({token, expira_em})
+    DURACAO_DIAS: 30,               // validade de cada sessão emitida
+    RENOVA_COM_MENOS_DE_DIAS: 7,    // resposta ok por sessão com menos que isso para vencer traz sessão nova
+    PROPRIEDADE_SEGREDO: 'SESSAO_SEGREDO'
   };
   var LLM_ESTADOS_TELA = ['parado', 'montando', 'conferindo', 'pronto', 'erro'];
 
@@ -1123,7 +1135,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     FONTES_ESTOQUE: FONTES_ESTOQUE, FONTES_CURADORIA: FONTES_CURADORIA, ESTADOS_CURADORIA: ESTADOS_CURADORIA,
     TURNOS: TURNOS, ATALHOS_PEDIDO: ATALHOS_PEDIDO, RESTRICAO: RESTRICAO, COR_PROTEINA: COR_PROTEINA,
     ETIQUETAS: ETIQUETAS, JULIA_FATORES: JULIA_FATORES, FORMAS_V2: FORMAS_V2,
-    LLM: LLM, LLM_ESTADOS_TELA: LLM_ESTADOS_TELA,
+    LLM: LLM, LLM_ESTADOS_TELA: LLM_ESTADOS_TELA, SESSAO: SESSAO,
     API_MOTOR_V2: {
       conferirProposta: '(proposta_llm, semana_base, dados, restricoes) -> { semana, aceitos[], recusas[], receitas_novas[] }  // R36, R37',
       aplicarRestricoes: '(semana, restricoes, dados, semente) -> { semana, resultado[] }  // R38',
@@ -5056,7 +5068,25 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   }
   function hojeIso() { return isoDe(agora()); }
   function horaTexto(d) { d = d ? new Date(d) : agora(); return d.getHours() + 'h' + pad(d.getMinutes()); }
-  function agoraIso() { var d = agora(); return isoDe(d) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
+  // hora do aparelho COM o fuso (2026-10-08T14:05:00+02:00): o servidor grava em UTC com Z, e as duas se comparam por Date (D17)
+  function agoraIso() {
+    var d = agora(), off = -d.getTimezoneOffset(), a = Math.abs(off);
+    return isoDe(d) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + (off < 0 ? '-' : '+') + pad(Math.floor(a / 60)) + ':' + pad(a % 60);
+  }
+  // instante (ms) de uma data-hora ISO com ou sem fuso (sem fuso = hora local do aparelho); null se vazia ou ilegível
+  function tempo(x) {
+    if (x == null || x === '') return null;
+    if (x instanceof Date) return x.getTime();
+    var s = String(x).trim().replace(' ', 'T');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) s += 'T00:00:00';
+    var t = Date.parse(s);
+    return isNaN(t) ? null : t;
+  }
+  // a depois de b? (vazio vale "antes de tudo"); nunca compara data-hora como texto
+  function depois(a, b) { var ta = tempo(a), tb = tempo(b); if (ta == null) return false; return tb == null ? true : ta > tb; }
+  function cmpTempo(a, b) { var ta = tempo(a), tb = tempo(b); if (ta == null && tb == null) return 0; if (ta == null) return -1; if (tb == null) return 1; return ta - tb; }
+  // a data (AAAA-MM-DD) no relógio do aparelho de uma data-hora com ou sem fuso
+  function dataLocal(x) { var t = tempo(x); return t == null ? '' : isoDe(new Date(t)); }
   function somarDias(iso, n) { var p = iso.split('-'); var d = new Date(+p[0], +p[1] - 1, +p[2] + n, 12); return isoDe(d); }
   function segundaDe(iso) { var p = iso.split('-'); var d = new Date(+p[0], +p[1] - 1, +p[2], 12); var k = (d.getDay() + 6) % 7; return somarDias(iso, -k); }
   function indiceDia(iso) { var p = iso.split('-'); return (new Date(+p[0], +p[1] - 1, +p[2], 12).getDay() + 6) % 7; }
@@ -5088,7 +5118,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
 
   App.base = {
     esc: esc, $: $, $$: $$, IC: IC, ic: ic,
-    agora: agora, hojeIso: hojeIso, horaTexto: horaTexto, agoraIso: agoraIso, isoDe: isoDe,
+    agora: agora, hojeIso: hojeIso, horaTexto: horaTexto, agoraIso: agoraIso, isoDe: isoDe, tempo: tempo, depois: depois, cmpTempo: cmpTempo, dataLocal: dataLocal,
     somarDias: somarDias, segundaDe: segundaDe, indiceDia: indiceDia, ddmm: ddmm, nomeDia: nomeDia, diaMinusculo: diaMinusculo, NA_DIA: NA_DIA,
     num: num, eur: eur, plural: plural, nomesPessoas: nomesPessoas, partes: partes, uuid: uuid, json: json, copia: copia,
     reduzMovimento: reduzMovimento
@@ -5229,6 +5259,14 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
         r = L[i];
         var s = lerJson(r.json) || {}, vers = lerJson(r.versoes_json) || {}, atual = getCaminho(s, d.caminho);
         if (ctx.servidor) {
+          // imita gas/Sincronia.gs (opSemanaPatch_): caminhos de estado só mudam por semana_estado; propostas_usadas só +1 até o teto
+          var seg0 = String(d.caminho || '').split('.')[0];
+          if (d.caminho === 'propostas_usadas') {
+            var usadasP = Number(s.propostas_usadas || 0);
+            if (!(typeof d.valor === 'number' && (d.valor === usadasP || d.valor === usadasP + 1) && d.valor <= C.TETO_PROPOSTAS)) return erro(op, 'entrada_invalida', 'propostas_usadas só sobe de 1 em 1 até ' + C.TETO_PROPOSTAS);
+          } else if (['estado', 'aprovada_em', 'aprovada_por', 'inicio', 'propostas_usadas', 'lista_aprovada'].indexOf(seg0) >= 0) {
+            return erro(op, 'entrada_invalida', 'o caminho ' + seg0 + ' só muda pela op semana_estado');
+          }
           var v = vers[d.caminho];
           // conflito: o caminho mudou depois da versão que o aparelho conhecia, por OUTRA pessoa, e o valor é diferente
           if (v && d.base_versao != null && Number(v.versao) > Number(d.base_versao) && v.por !== por && !igual(atual, d.valor)) {
@@ -5349,7 +5387,8 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   var C = root.CONTRATO;
   var B = function () { return App.base; };
 
-  var S = { abas: null, rede: true, latencia: 120, latencia_llm: 900, chamadas: [], llm_falha: null };
+  var S = { abas: null, rede: true, latencia: 120, latencia_llm: 900, chamadas: [], llm_falha: null,
+    sessao_vencida: false, falha_aplicar: null }; // ganchos do autoteste (TELA-B): sessão forçada a vencer · erro do servidor em toda aplicar
 
   function linhaIng(i) { return { id: i.id, nome_pt: i.nome_pt, categoria: i.categoria, json: JSON.stringify(i), atualizado_em: '', por: C.POR_SEMENTE }; }
   function linhaRec(r) {
@@ -5417,22 +5456,40 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   function chamar(acao, corpo) {
     corpo = corpo || {};
     if (!S.abas) iniciar();
-    S.chamadas.push({ acao: acao, em: Date.now(), n_ops: corpo.ops ? corpo.ops.length : 0 });
+    S.chamadas.push({ acao: acao, em: Date.now(), n_ops: corpo.ops ? corpo.ops.length : 0, cred: corpo.sessao ? 'sessao' : 'idToken' });
     var llm = acao.indexOf('llm_') === 0;
     return responder(llm ? S.latencia_llm : S.latencia, function () {
-      var pessoa = pessoaDoToken(corpo.idToken);
+      // sessão própria (como o servidor real): 'sessao.<pessoa>.<expira em ms>'; inválida ou vencida volta sem_login
+      var pessoa, emitir = false, ms = corpo.sessao ? /^sessao\.(\w+)\.(\d+)$/.exec(corpo.sessao) : null;
+      if (corpo.sessao) {
+        if (!ms || S.sessao_vencida || Number(ms[2]) < Date.now()) return { ok: false, erro: { codigo: 'sem_login', mensagem: 'sessão inválida ou vencida; entre de novo' } };
+        pessoa = ms[1];
+      } else {
+        pessoa = pessoaDoToken(corpo.idToken);
+        emitir = acao === 'carregar' || acao === 'ping';
+      }
       if (!pessoa) return { ok: false, erro: { codigo: 'sem_login', mensagem: 'token ausente ou vencido' } };
       if (pessoa === 'intruso') return { ok: false, erro: { codigo: 'sem_acesso', mensagem: 'e-mail sem acesso' } };
+      var resp = executar(acao, corpo, pessoa);
+      if (emitir && resp && resp.ok) { var exp = Date.now() + 30 * 86400000; resp.sessao = { token: 'sessao.' + pessoa + '.' + exp, expira_em: new Date(exp).toISOString() }; }
+      return resp;
+    });
+  }
+
+  function executar(acao, corpo, pessoa) {
+    {
       switch (acao) {
         case 'ping': return { ok: true, email: pessoa + '@exemplo.invalid', pessoa: pessoa, versao_api: 'falsa-1' };
         case 'carregar': return carregar(corpo.desde || {}, pessoa);
-        case 'aplicar': return aplicar(corpo.ops || [], pessoa);
+        case 'aplicar':
+          if (S.falha_aplicar) return { ok: false, erro: { codigo: S.falha_aplicar, mensagem: 'falha simulada' } };
+          return aplicar(corpo.ops || [], pessoa);
         case 'llm_propor_semana': return llmProporSemana(corpo, pessoa);
         case 'llm_interpretar_pedido': return llmInterpretar(corpo, pessoa);
         case 'llm_ler_foto': return llmLerFoto(corpo, pessoa);
         default: return { ok: false, erro: { codigo: 'acao_desconhecida', mensagem: acao } };
       }
-    });
+    }
   }
 
   function carregar(desde, pessoa) {
@@ -5476,8 +5533,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     var prov = config('llm_provedor'), mod = modeloDe(prov, 'forte');
     if (config('modo_llm') !== 'ligado') return envelope('propor_semana', prov, mod, null, 0, 0, { codigo: 'desligado', mensagem: 'Montar com o Claude está desligado no Config' });
     if (S.llm_falha) return envelope('propor_semana', prov, mod, null, 0, 0, { codigo: S.llm_falha, mensagem: 'falha simulada' });
-    // R43: sem faturamento do Gemini (GEMINI_PAGO = nao), o plano e o Livro não vão ao Gemini
-    if (prov === 'gemini' && config('gemini_pago') !== 'sim') return envelope('propor_semana', prov, mod, null, 0, 0, { codigo: 'provedor_nao_aprovado', mensagem: 'Gemini sem faturamento não recebe o plano (R43)' });
+    // ADR-026 (R43 revogada): o Gemini recebe a proposta da semana com ou sem faturamento
     var fx = root.MASSA_FALSA && root.MASSA_FALSA.llm && root.MASSA_FALSA.llm.proposta;
     var dados = fx ? B().copia(fx.dados || fx) : proporPeloMotor(corpo);
     return envelope('propor_semana', prov, mod, dados, 42000, 2600, null);
@@ -5537,7 +5593,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
 })(this);
 
 /* ===== app/dados/api.js ===== */
-/* app/dados/api.js · porta única para o Apps Script (CONTRATO §11): POST text/plain {acao, idToken, ...}.
+/* app/dados/api.js · porta única para o Apps Script (CONTRATO §11): POST text/plain {acao, sessao | idToken, ...}.
  * Resposta {ok, ...} ou {ok:false, erro:{codigo, mensagem}}. Falha de rede vira erro com rede=true (a fila espera).
  * text/plain evita o preflight de CORS (o Apps Script não responde OPTIONS; webapp-mandu §2.5).
  * Com ?api=falsa, a mesma porta chama o servidor em memória (dados/api-falsa.js).
@@ -5566,11 +5622,16 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   // Devolve a resposta inteira (a camada de cima decide). Lança só em falha de transporte.
   function chamar(acao, corpo) {
     corpo = Object.assign({}, corpo || {});
-    corpo.idToken = App.login ? App.login.token() : null;
+    // sessão própria enquanto valer; senão o ID token do Google (só o login pelo Google manda idToken)
+    var cred = App.login ? App.login.credencial() : null;
+    delete corpo.idToken; delete corpo.sessao;
+    if (cred) corpo[cred.campo] = cred.valor; else corpo.idToken = null;
     var p = App.config.API_FALSA ? App.apiFalsa.chamar(acao, corpo).catch(function (e) { throw ErroApi('rede', String(e && e.message || e), true); })
                                  : chamarReal(acao, corpo);
     return p.then(function (resp) {
-      if (resp && resp.ok === false && resp.erro && (resp.erro.codigo === 'sem_login' || resp.erro.codigo === 'sem_acesso') && App.login) {
+      if (resp && resp.ok !== false && resp.sessao && App.login) App.login.guardarSessao(resp.sessao);
+      if (resp && resp.ok === false && resp.erro && App.login &&
+          (resp.erro.codigo === 'sem_acesso' || App.login.CODIGOS_LOGIN.indexOf(resp.erro.codigo) >= 0)) {
         App.login.recusado(resp.erro.codigo);
       }
       return resp;
@@ -5590,6 +5651,9 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
  *  4. Envio coalescente (ref 08 §6.1): pedido de envio durante um envio não se perde, vira "refazer".
  *  5. Depois de todo aplicar vem um carregar com "desde"; op confirmada só sai da fila quando a carga que a contém chegou.
  *  6. Conflito: o aparelho adota o valor da planilha (a op sai da fila) e mostra sync_conflito_texto.
+ *  7. Erro do servidor que não é de rede (D8): pausa crescente 2 s, 4 s, 8 s… até 60 s; erro definitivo (entrada_invalida,
+ *     versao_antiga, de login…) para sem repetir e a tela diz o porquê com "Tentar de novo". Depois de 3 falhas seguidas
+ *     a pílula também deixa de dizer "Sincronizado" (nunca com fila pendente).
  * Sem template literal (crase).
  */
 (function (root) {
@@ -5601,7 +5665,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   var st = {
     base: {}, fila: [], abas: {}, rev: 0, seq: 0,
     estado: 'ok', ultima_em: null, rede_ok: true, enviando: false, refazer: false,
-    conflitos: [], tentativas: 0, timer: null, ouvintes: [], ultimo_salvo: null, carregou_uma_vez: false
+    conflitos: [], tentativas: 0, falhas: 0, erro_envio: null, timer: null, ouvintes: [], ultimo_salvo: null, carregou_uma_vez: false
   };
 
   function avisar() { st.rev++; st.ouvintes.forEach(function (f) { try { f(); } catch (e) { console.error(e); } }); }
@@ -5624,6 +5688,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     // sem rede tem precedência sobre "enviando": a retentativa com backoff não pisca "Sincronizando…"
     if (st.conflitos.length) st.estado = 'conflito';
     else if (!st.rede_ok) st.estado = 'sem_rede';
+    else if (st.erro_envio && st.erro_envio.visivel) st.estado = 'falhou';
     else if (st.enviando) st.estado = 'enviando';
     else st.estado = 'ok';
   }
@@ -5674,23 +5739,51 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     clearTimeout(st.timer);
     st.timer = setTimeout(enviar, ms || 0);
   }
-  function podeFalar() { return App.login && App.login.token(); }
+  function podeFalar() { return App.login && App.login.pode(); }
+  // erro que repetir não conserta: a fila para e a tela explica (o resto, o app tenta de novo com pausa crescente)
+  var DEFINITIVOS = ['entrada_invalida', 'versao_antiga', 'conflito', 'transicao_invalida', 'acao_desconhecida', 'config'];
+  var TEXTO_ERRO = {
+    entrada_invalida: 'a planilha não aceitou a alteração',
+    versao_antiga: 'a semana mudou em outro celular: recarregue o app',
+    conflito: 'a semana mudou em outro celular: recarregue o app',
+    transicao_invalida: 'a semana mudou de passo em outro celular',
+    acao_desconhecida: 'o app está desatualizado: feche e abra de novo',
+    config: 'o servidor está sem configuração',
+    sem_resposta: 'o servidor não respondeu a todas as alterações',
+    interno: 'o servidor deu erro'
+  };
+  function ehLogin(cod) { return cod === 'sem_acesso' || (App.login && App.login.CODIGOS_LOGIN.indexOf(cod) >= 0); }
+  function pausaServidor(n) { return Math.min(60000, 2000 * Math.pow(2, n - 1)) + Math.random() * 500; }
+  function textoErroEnvio() {
+    var e = st.erro_envio; if (!e) return null;
+    var n = pendentes().length;
+    return 'Não sincronizou: ' + (TEXTO_ERRO[e.codigo] || 'erro ' + e.codigo) + '.' + (n ? ' ' + n + (n === 1 ? ' alteração espera' : ' alterações esperam') + ' neste aparelho.' : '');
+  }
+  function tentarDeNovo() { st.falhas = 0; st.erro_envio = null; atualizarEstado(); avisar(); return enviar(); }
 
   function enviar() {
     if (st.enviando) { st.refazer = true; return Promise.resolve(); }
-    if (!podeFalar()) return Promise.resolve();
+    if (!podeFalar()) { if (pendentes().length && App.login) App.login.verificar(); return Promise.resolve(); }
     st.enviando = true; st.refazer = false; atualizarEstado(); avisar();
     var lote = pendentes().slice(0, App.config.OPS_POR_CHAMADA);
     var passo = lote.length ? App.api.chamar('aplicar', { ops: lote.map(function (r) { return r.op; }) }).then(function (resp) { return tratarAplicar(lote, resp); })
                             : Promise.resolve();
+    var falhou = false;
     return passo.then(function () { return carregar(true); }).then(function () {
-      st.rede_ok = true; st.tentativas = 0;
+      st.rede_ok = true; st.tentativas = 0; st.falhas = 0; st.erro_envio = null;
     }, function (e) {
-      if (e && e.rede) { st.rede_ok = false; st.tentativas++; agendarEnvio(Math.min(30000, 1000 * Math.pow(2, st.tentativas)) + Math.random() * 1000); }
-      else console.warn('sincronia:', e && (e.codigo || e.message));
+      falhou = true;
+      if (e && e.rede) { st.rede_ok = false; st.tentativas++; agendarEnvio(Math.min(30000, 1000 * Math.pow(2, st.tentativas)) + Math.random() * 1000); return; }
+      var cod = e && e.codigo || 'interno';
+      console.warn('sincronia:', cod);
+      if (ehLogin(cod)) { st.erro_envio = null; return; } // o login cuida: Entrar com o aviso da fila
+      st.falhas++;
+      var def = DEFINITIVOS.indexOf(cod) >= 0;
+      st.erro_envio = { codigo: cod, definitivo: def, visivel: def || st.falhas >= 3 };
+      if (!def) agendarEnvio(pausaServidor(st.falhas));
     }).then(function () {
       st.enviando = false; atualizarEstado(); avisar();
-      if ((st.refazer || pendentes().length) && st.rede_ok && podeFalar()) return enviar();
+      if (!falhou && (st.refazer || pendentes().length) && st.rede_ok && podeFalar()) return enviar();
     });
   }
 
@@ -5700,17 +5793,20 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       if (cod === 'sem_login' || cod === 'sem_acesso') return Promise.reject(Object.assign(new Error(cod), { codigo: cod }));
       return Promise.reject(Object.assign(new Error('aplicar falhou: ' + cod), { codigo: cod }));
     }
-    var porId = {}; (resp.resultados || []).forEach(function (r) { porId[r.op_id] = r; });
+    var porId = {}, faltou = false; (resp.resultados || []).forEach(function (r) { porId[r.op_id] = r; });
     var gravacoes = lote.map(function (reg) {
       var r = porId[reg.op_id];
-      if (!r) return null; // sem resposta para esta op: tenta de novo no próximo envio
+      if (!r) { faltou = true; return null; } // sem resposta para esta op: tenta de novo (com pausa) no próximo envio
       if (r.ok) { reg.enviada = true; return App.idb.gravar('fila', reg.op_id, reg); }
       // conflito ou recusa: a planilha manda. A op sai da fila e a tela diz o que foi recusado.
       st.conflitos.push({ op: reg.op, conflito: r.conflito || null, erro: r.erro || null });
       st.fila = st.fila.filter(function (x) { return x.op_id !== reg.op_id; });
       return App.idb.apagar('fila', reg.op_id);
     });
-    return Promise.all(gravacoes).then(function () { recompor(); });
+    return Promise.all(gravacoes).then(function () {
+      recompor();
+      if (faltou) return Promise.reject(Object.assign(new Error('sem resposta para parte das ops'), { codigo: 'sem_resposta' }));
+    });
   }
 
   // ---------- carregar (ao abrir, ao voltar ao primeiro plano, depois de cada aplicar) ----------
@@ -5763,14 +5859,27 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     [/^dias_travados\./, 'dia mantido em outro celular'],
     [/^pedidos\./, 'pedido alterado em outro celular']
   ];
-  function textoConflito() {
-    var n = st.conflitos.length; if (!n) return null;
-    var motivos = st.conflitos.map(function (c) {
+  // recusa de verdade por conflito (outro celular mexeu) ou por outro motivo? Só a primeira diz "outro celular" (D13)
+  function ehConflitoReal(c) {
+    var cod = c.erro && c.erro.codigo;
+    return !!(c.conflito || cod === 'conflito' || cod === 'versao_antiga' || cod === 'transicao_invalida');
+  }
+  function motivoRecusa(c) {
+    var cod = c.erro && c.erro.codigo, msg = c.erro && c.erro.mensagem || '';
+    if (ehConflitoReal(c)) {
       var cam = c.conflito && c.conflito.caminho || (c.op.dados && c.op.dados.caminho) || '';
       for (var i = 0; i < TEXTO_CAMINHO.length; i++) if (TEXTO_CAMINHO[i][0].test(cam)) return TEXTO_CAMINHO[i][1];
-      if (c.erro && c.erro.codigo === 'transicao_invalida') return 'a semana mudou de passo em outro celular';
+      if (cod === 'transicao_invalida') return 'a semana mudou de passo em outro celular';
       return 'alterada em outro celular';
-    });
+    }
+    if (cod === 'entrada_invalida' && /n[ãa]o existe/.test(msg)) return 'a semana não está na planilha: recarregue o app';
+    if (cod === 'entrada_invalida') return 'a planilha não aceitou o formato da alteração';
+    return 'a planilha não aceitou a alteração' + (cod ? ' (' + cod + ')' : '');
+  }
+  function temConflitoReal() { return st.conflitos.some(ehConflitoReal); }
+  function textoConflito() {
+    var n = st.conflitos.length; if (!n) return null;
+    var motivos = st.conflitos.map(motivoRecusa);
     var unicos = motivos.filter(function (m, i) { return motivos.indexOf(m) === i; });
     return 'A planilha recusou ' + n + ' alteraç' + (n === 1 ? 'ão' : 'ões') + ' (' + unicos.join('; ') + ').';
   }
@@ -5789,7 +5898,8 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     st: st, iniciar: iniciar, aoMudar: aoMudar, abas: function () { return st.abas; }, rev: function () { return st.rev; },
     enfileirar: enfileirar, enviar: enviar, carregar: carregar, agendarEnvio: agendarEnvio,
     pendentes: function () { return pendentes().length; }, textoSalvo: textoSalvo, temCopia: temCopia,
-    textoConflito: textoConflito, aceitarConflitos: aceitarConflitos, ligarGatilhos: ligarGatilhos,
+    textoConflito: textoConflito, temConflitoReal: temConflitoReal, aceitarConflitos: aceitarConflitos, ligarGatilhos: ligarGatilhos,
+    textoErroEnvio: textoErroEnvio, tentarDeNovo: tentarDeNovo,
     baseVersaoDaSemana: baseVersaoDaSemana
   };
 })(this);
@@ -5823,7 +5933,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
 
   function preferencias(chave) {
     return linhas('Preferencias').filter(function (l) { return l.chave === chave; })
-      .slice().sort(function (a, b) { return String(a.em).localeCompare(String(b.em)); });
+      .slice().sort(function (a, b) { return B().cmpTempo(a.em, b.em); });
   }
   function juliaFator() {
     var p = preferencias('julia_fator'), ult = p[p.length - 1];
@@ -5943,6 +6053,9 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
  * a cópia local continua abrindo, a fila espera, e a tela Entrar volta quando há rede.
  * Renovação silenciosa (sugestão Claude · validar no iPhone): auto_select + google.accounts.id.prompt(), que é o
  * One Tap do GIS (não é diálogo nativo do navegador). Se não vier credencial em 8 s, a tela Entrar aparece.
+ * Sessão própria (D7, BACKLOG 115): toda resposta ok de ação autenticada pode trazer sessao {token, expira_em} (30 dias).
+ * Guardada junto do e-mail e da pessoa; enquanto valer, vai no corpo como "sessao" no lugar do idToken, e o app abre
+ * direto (sem One Tap, sem tela Entrar). Só o login pelo Google manda idToken. Erro de login do servidor apaga tudo.
  * ?api=falsa: token falso "falso.<pessoa>", sem Google.
  * Sem template literal (crase).
  */
@@ -5950,7 +6063,9 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   'use strict';
   var App = root.App = root.App || {};
   var B = function () { return App.base; };
-  var L = { token: null, email: null, pessoa: null, exp: 0, estado: 'fora', erro: null, gis: null, ouvinte: null };
+  var L = { token: null, email: null, pessoa: null, exp: 0, sessao: null, sessao_exp: 0, estado: 'fora', erro: null, gis: null, ouvinte: null };
+  // códigos de resposta que querem dizer "entre de novo" (sem_acesso é à parte: e-mail fora da lista)
+  var CODIGOS_LOGIN = ['sem_login', 'nao_autorizado', 'sessao_expirada'];
 
   function decodeJwt(t) {
     var p = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
@@ -5959,13 +6074,35 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   }
   function iniciar() {
     return App.idb.ler('kv', 'login').then(function (x) {
-      if (x) { L.token = x.token; L.email = x.email; L.pessoa = x.pessoa; L.exp = x.exp || 0; }
-      L.estado = token() ? 'dentro' : (L.email ? 'vencido' : 'fora');
+      if (x) { L.token = x.token; L.email = x.email; L.pessoa = x.pessoa; L.exp = x.exp || 0; L.sessao = x.sessao || null; L.sessao_exp = x.sessao_exp || 0; }
+      L.estado = credencial() ? 'dentro' : (L.email ? 'vencido' : 'fora');
       return L.estado;
     });
   }
   function token() { return L.token && Date.now() < (L.exp - 60000) ? L.token : null; }
-  function gravar() { return App.idb.gravar('kv', 'login', { token: L.token, email: L.email, pessoa: L.pessoa, exp: L.exp }); }
+  function sessaoValida() { return !!(L.sessao && L.sessao_exp && Date.now() < L.sessao_exp - 60000); }
+  // o que vai no corpo da chamada: a sessão própria enquanto valer; senão o ID token do Google (1 h); senão nada
+  function credencial() {
+    if (sessaoValida()) return { campo: 'sessao', valor: L.sessao };
+    var t = token(); return t ? { campo: 'idToken', valor: t } : null;
+  }
+  function pode() { return !!credencial(); }
+  function gravar() { return App.idb.gravar('kv', 'login', { token: L.token, email: L.email, pessoa: L.pessoa, exp: L.exp, sessao: L.sessao, sessao_exp: L.sessao_exp }); }
+  // resposta ok trouxe sessao {token, expira_em}: guarda (só grava no disco se mudou)
+  function guardarSessao(s) {
+    if (!s || !s.token || !s.expira_em) return;
+    var exp = Date.parse(s.expira_em); if (isNaN(exp) || exp <= Date.now()) return;
+    if (L.sessao === s.token && L.sessao_exp === exp) return;
+    L.sessao = s.token; L.sessao_exp = exp;
+    return gravar();
+  }
+  // estado visto de fora: "dentro" sem credencial que valha (sessão e token vencidos com o app aberto) é "vencido"
+  function estado() { return L.estado === 'dentro' && !credencial() ? 'vencido' : L.estado; }
+  // com o app aberto a credencial pode vencer sem resposta de erro: assume o vencimento (a fila espera, o Entrar avisa)
+  function verificar() {
+    if (L.estado === 'dentro' && !credencial()) { L.estado = 'vencido'; gravar(); mudou(); }
+    return L.estado;
+  }
   function aoMudar(f) { L.ouvinte = f; }
   function mudou() { if (L.ouvinte) L.ouvinte(L.estado); }
 
@@ -5974,7 +6111,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     var info;
     try { info = emailFalso ? { email: emailFalso, exp: Math.floor(Date.now() / 1000) + 3600 } : decodeJwt(cred); }
     catch (e) { L.estado = 'erro'; L.erro = 'credencial ilegível'; mudou(); return Promise.resolve(false); }
-    L.token = cred; L.email = info.email; L.exp = info.exp * 1000; L.estado = 'conferindo'; L.erro = null; mudou();
+    L.token = cred; L.sessao = null; L.sessao_exp = 0; L.email = info.email; L.exp = info.exp * 1000; L.estado = 'conferindo'; L.erro = null; mudou();
     return App.api.chamar('ping', {}).then(function (r) {
       if (r && r.ok) { L.pessoa = r.pessoa || L.pessoa; L.estado = 'dentro'; return gravar().then(function () { mudou(); return true; }); }
       var cod = r && r.erro ? r.erro.codigo : 'interno';
@@ -5982,15 +6119,15 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     }, function () { L.token = null; L.estado = 'sem_rede'; mudou(); return false; });
   }
 
-  // chamada recusada pela API (token vencido ou e-mail fora da lista)
+  // chamada recusada pela API (token ou sessão vencidos, ou e-mail fora da lista): apaga a sessão
   function recusado(codigo) {
-    L.token = null; L.exp = 0;
+    L.token = null; L.exp = 0; L.sessao = null; L.sessao_exp = 0;
     L.estado = codigo === 'sem_acesso' ? 'sem_acesso' : 'vencido';
     gravar(); mudou();
   }
   function sair() {
     try { if (root.google && root.google.accounts && root.google.accounts.id) root.google.accounts.id.disableAutoSelect(); } catch (e) { /* ok */ }
-    L.token = null; L.exp = 0; L.pessoa = null; L.email = null; L.estado = 'fora';
+    L.token = null; L.exp = 0; L.sessao = null; L.sessao_exp = 0; L.pessoa = null; L.email = null; L.estado = 'fora';
     return gravar().then(mudou);
   }
 
@@ -6045,7 +6182,8 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   }
 
   App.login = {
-    L: L, iniciar: iniciar, token: token, pessoa: function () { return L.pessoa; }, email: function () { return L.email; }, estado: function () { return L.estado; },
+    L: L, iniciar: iniciar, token: token, credencial: credencial, pode: pode, guardarSessao: guardarSessao, verificar: verificar, CODIGOS_LOGIN: CODIGOS_LOGIN,
+    pessoa: function () { return L.pessoa; }, email: function () { return L.email; }, estado: estado,
     aoMudar: aoMudar, comCredencial: comCredencial, recusado: recusado, sair: sair, desenharBotao: desenharBotao, renovar: renovar, entrarFalso: entrarFalso
   };
 })(this);
@@ -6269,7 +6407,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     return '<section class="card pedsem" style="margin-top:12px"><label for="ped-sem"><b>Pedido para a semana</b><span class="small mut">Vale para todos os dias que você não manteve.</span></label><textarea class="fld" id="ped-sem" rows="1" data-pedido-texto="semana" data-inicio="' + w.inicio + '" placeholder="Ex.: menos carne vermelha, sem pimentão">' + esc(p ? p.texto || '' : '') + '</textarea></section>';
   }
   // pedido pendente = feito depois da última aplicação (semana.pedidos_aplicados_em · desvio registrado)
-  function pendente(sem, p) { return temPedido(p) && (!sem.pedidos_aplicados_em || String(p.em || '') > String(sem.pedidos_aplicados_em)); }
+  function pendente(sem, p) { return temPedido(p) && (!sem.pedidos_aplicados_em || B().depois(p.em, sem.pedidos_aplicados_em)); }
   function resumoPedidos(sem) {
     var dias = C.DIA_IDS.filter(function (id) { return pendente(sem, pedidoDe(sem, id)) && !(sem.dias_travados || {})[id]; });
     var k = Object.keys(sem.dias_travados || {}).filter(function (id) { return sem.dias_travados[id]; }).length, semana = pendente(sem, pedidoDe(sem, 'semana'));
@@ -6321,7 +6459,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   }, true);
 
   App.comp = { diaVista: diaVista, issuesDoDia: issuesDoDia, dayCard: dayCard, metersHTML: metersHTML, legendHTML: legendHTML, checkSum: checkSum,
-    conferenciaHTML: conferenciaHTML, pedCtrl: pedCtrl, pedSemHTML: pedSemHTML, resumoPedidos: resumoPedidos, temPedido: temPedido, pedTexto: pedTexto };
+    conferenciaHTML: conferenciaHTML, pedCtrl: pedCtrl, pedSemHTML: pedSemHTML, resumoPedidos: resumoPedidos, temPedido: temPedido, pedTexto: pedTexto, pendente: pendente };
 })(this);
 
 /* ---------- Trocar (Revisar e, pela R41, a semana em curso) ---------- */
@@ -6390,6 +6528,17 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
 
   var EVENTOS_PADRAO = { ter: ['natacao_julia', 'treino_almoco_g'] }; // padrão do CONTRATO §2 (eventos_dia), o mesmo do motor
 
+  // D6 · o Pedrosa começa como "Sim" só se a semana anterior pediu E o prazo ainda não passou. O checklist reprova ("falha") o pedido
+  // de uma semana criada depois de entrega − 3 dias; criar toda semana com "Sim" travava a aprovação em todo planejamento feito
+  // depois da quarta (o planejamento normal é no fim de semana). Sem semana anterior: "Não". A pessoa muda no Contexto.
+  var OFF_ENTREGA = { sex: -3, sab: -2, dom: -1 }; // a entrega é no fim de semana ANTES da semana (R13), igual a telas/contexto.js
+  function pedrosaInicial(inicio, entregaDia) {
+    var ant = E().semana(B().somarDias(inicio, -7));
+    if (!ant || !ant.sem || !ant.sem.pedido_pedrosa) return false;
+    var antec = C.LOJAS.pedrosa.antecedencia_dias, ent = B().somarDias(inicio, OFF_ENTREGA[entregaDia || 'sab']);
+    return B().hojeIso() <= B().somarDias(ent, -antec[antec.length - 1]);
+  }
+
   function esqueleto(inicio) {
     var dias = C.DIAS.map(function (d, i) {
       return { data: B().somarDias(inicio, i), dia_id: d.id, eventos: (EVENTOS_PADRAO[d.id] || []).concat(d.id === 'sab' ? ['livre'] : []),
@@ -6397,7 +6546,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     });
     return {
       id: 'semana-' + inicio, inicio: inicio, status: 'rascunho', criada_em: B().agoraIso(), validada_em: null,
-      entrega_dia: 'sab', pedido_pedrosa: true, menu_escola: [], dias: dias, estoque: [], estoque_atualizado_em: null,
+      entrega_dia: 'sab', pedido_pedrosa: pedrosaInicial(inicio, 'sab'), menu_escola: [], dias: dias, estoque: [], estoque_atualizado_em: null,
       compras_marcadas: {}, tarefas_feitas: {}, nota_editorial: null, origem_plano: 'sugestao',
       estado: 'estoque', propostas_usadas: 0, modo_proposta: 'motor', dias_travados: {}, pedidos: {}, restricoes: {},
       pedido_resultado: [], llm_recusas: [], receitas_novas: [], janelas_livres: [], tarefas_quando: {}, alertas_aceitos: [],
@@ -6477,13 +6626,55 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     return nova;
   }
 
+  // D10: a chamada da IA lê a semana da PLANILHA; antes dela, a fila de gravação tem de esvaziar. enviar() sozinho não serve:
+  // com um envio em curso ele devolve uma promessa já resolvida. Espera por evento do sync (aoMudar) e desiste em 20 s
+  // (sem rede ou sem login a fila não esvazia; a chamada segue e cai no motor com o motivo escrito).
+  function esperarFila(tetoMs) {
+    var S = App.sync, fim = Date.now() + (tetoMs || 20000);
+    return new Promise(function (resolve) {
+      var feito = false, timer = null;
+      // gravação em curso = op ainda sem confirmação do servidor (pendentes); um carregar de leitura não atrapalha
+      function livre() { return S.pendentes() === 0; }
+      function fechar() {
+        if (feito) return; feito = true; clearTimeout(timer);
+        // tira o ouvinte fora da iteração do avisar() (splice no meio do forEach pularia o ouvinte seguinte)
+        setTimeout(function () { var k = S.st.ouvintes.indexOf(passo); if (k >= 0) S.st.ouvintes.splice(k, 1); }, 0);
+        resolve();
+      }
+      function passo() {
+        if (livre() || Date.now() >= fim || S.st.rede_ok === false) return fechar();
+        if (!S.st.enviando) S.enviar();
+      }
+      S.st.ouvintes.push(passo);
+      timer = setTimeout(fechar, Math.max(0, fim - Date.now()));
+      passo();
+    });
+  }
+
   // ---------- modo B · LLM propõe, motor confere (R36) ----------
-  // devolve { semana, recusas, receitas_novas, falhas_checklist, origem: 'llm'|'motor', aviso } (a tela só vê isto)
-  function proporComLlm(inicio, diasAPropor, restricoes) {
+  // o que a pessoa lê quando a IA falha: o motivo pelo código do contrato (LLM.ERROS + erros da API), nunca um "não respondeu" para tudo
+  function avisoDaFalha(cod, nome) {
+    var m = ({
+      limite: 'A resposta do ' + nome + ' ficou grande demais.',
+      tempo: 'O ' + nome + ' não respondeu.', rede: 'O ' + nome + ' não respondeu.',
+      sem_chave: 'Falta a chave do ' + nome + ' no servidor.',
+      recusa: 'O ' + nome + ' recusou montar esta semana.',
+      esquema: 'A resposta do ' + nome + ' veio fora do formato esperado.',
+      desligado: 'Montar com o ' + nome + ' está desligado no Config.',
+      versao_antiga: 'A semana mudou em outro aparelho antes da resposta.',
+      sem_login: 'Sem login ativo para falar com o ' + nome + '.', sem_acesso: 'Sem login ativo para falar com o ' + nome + '.'
+    })[cod];
+    if (cod === 'provedor_nao_aprovado') return 'Esse provedor não está aprovado para os dados da família. Montei com o motor.';
+    return (m || 'O ' + nome + ' não respondeu.') + ' Montei com o motor.';
+  }
+  // devolve { semana, recusas, receitas_novas, falhas_checklist, origem: 'llm'|'motor', aviso, erro } (a tela só vê isto)
+  // opts.semente: a semente da "Outra proposta"; se a IA falha, o motor monta com ela (outra semana, não a mesma de antes)
+  function proporComLlm(inicio, diasAPropor, restricoes, opts) {
+    opts = opts || {};
     var w = E().semana(inicio), sem = w.sem;
     var dias = diasAPropor || C.DIA_IDS.filter(function (id) { return !(sem.dias_travados || {})[id]; });
-    // o Apps Script lê a semana da planilha: a fila sobe antes
-    return App.sync.enviar().then(function () {
+    // o Apps Script lê a semana da planilha: a fila sobe antes (D10)
+    return esperarFila().then(function () {
       return App.api.chamar('llm_propor_semana', { semana_inicio: inicio, semana_versao: App.sync.baseVersaoDaSemana(inicio), dias_a_propor: dias, pedidos: sem.pedidos || {} });
     }).then(function (env) {
       if (!env || !env.ok || !env.dados) throw Object.assign(new Error('llm'), { codigo: env && env.erro ? env.erro.codigo : 'provedor' });
@@ -6494,20 +6685,19 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     }).catch(function (e) {
       // erro nunca derruba a tela: o aparelho cai para o motor e escreve o porquê (CONTRATO §13)
       var nome = ({ claude: 'Claude', gemini: 'Gemini' })[E().config('llm_provedor')] || 'Claude', cod = e && (e.codigo || e.message);
-      var aviso = cod === 'provedor_nao_aprovado' ? 'Gemini só com faturamento ligado (o nível gratuito pode usar o conteúdo). Montei com o motor.'
-                                                  : 'O ' + nome + ' não respondeu. Montei com o motor.';
-      return { semana: montarPeloMotor(inicio), recusas: [], receitas_novas: [], origem: 'motor', erro: cod, aviso: aviso };
+      return { semana: montarPeloMotor(inicio, opts.semente), recusas: [], receitas_novas: [], origem: 'motor', erro: cod, aviso: avisoDaFalha(cod, nome) };
     });
   }
 
   // ---------- pedido de ajuste (R38) ----------
   function diasComPedido(sem) { return Object.keys(sem.pedidos || {}).filter(function (k) { var p = sem.pedidos[k]; return p && ((p.atalhos || []).length || (p.texto || '').trim()); }); }
-  function restricoesDoPedido(sem) {
+  function restricoesDoPedido(sem, semLlm) {
     var peds = sem.pedidos || {}, alvos = diasComPedido(sem);
     var rs = M().restricoesDosAtalhos(peds);
     var comTexto = {}; alvos.forEach(function (k) { if ((peds[k].texto || '').trim()) comTexto[k] = { atalhos: peds[k].atalhos || [], texto: peds[k].texto }; });
     if (!Object.keys(comTexto).length) return Promise.resolve({ restricoes: rs, texto_ok: true });
-    return App.sync.enviar().then(function () {
+    if (semLlm) return Promise.resolve({ restricoes: rs, texto_ok: false }); // D3: a pessoa cancelou a espera da IA
+    return esperarFila().then(function () {
       return App.api.chamar('llm_interpretar_pedido', { semana_inicio: sem.inicio, pedidos: comTexto });
     }).then(function (env) {
       if (env && env.ok && env.dados && env.dados.restricoes) return { restricoes: rs.concat(env.dados.restricoes), texto_ok: true };
@@ -6516,13 +6706,16 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   }
   // aplica os pedidos da semana: devolve { semana, resultado[], origem, aviso? }
   // soDias (R41): na semana em curso só os dias que ainda não passaram entram no pedido
-  function aplicarPedidos(inicio, semente, soDias) {
+  // opts.semLlm (D3): a pessoa cancelou a espera da IA; os pedidos saem só pelo motor e pelos atalhos
+  function aplicarPedidos(inicio, semente, soDias, opts) {
+    opts = opts || {};
     var sem = E().semana(inicio).sem, alvos = diasComPedido(sem);
     if (soDias) alvos = alvos.filter(function (a) { return soDias.indexOf(a) >= 0; });
-    return restricoesDoPedido(sem).then(function (rq) {
+    return restricoesDoPedido(sem, opts.semLlm).then(function (rq) {
       if (soDias) rq.restricoes = rq.restricoes.filter(function (r) { return soDias.indexOf(r.alvo) >= 0; });
       var aviso = rq.texto_ok ? null : 'Não consegui ler o texto do pedido agora; apliquei só os atalhos.';
-      if (E().config('modo_llm') === 'ligado') {
+      if (opts.semLlm) aviso = 'Apliquei os pedidos com o motor, sem esperar a IA.' + (rq.texto_ok ? '' : ' O texto do pedido não foi lido, só os atalhos.');
+      if (E().config('modo_llm') === 'ligado' && !opts.semLlm) {
         var dias = alvos.indexOf('semana') >= 0 ? C.DIA_IDS.filter(function (id) { return !(sem.dias_travados || {})[id]; }) : alvos.filter(function (k) { return k !== 'semana' && !(sem.dias_travados || {})[k]; });
         return proporComLlm(inicio, dias, rq.restricoes).then(function (r) {
           if (r.origem === 'llm') { r.resultado = []; r.aviso = aviso; return r; }
@@ -6540,9 +6733,9 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   }
 
   App.planejar = {
-    esqueleto: esqueleto, garantirSemana: garantirSemana, gravarSemana: gravarSemana, dadosPara: dadosPara, contexto: contexto,
-    estoqueDaSemana: estoqueDaSemana, montarPeloMotor: montarPeloMotor, proporComLlm: proporComLlm, aplicarPedidos: aplicarPedidos,
-    diasComPedido: diasComPedido, restricoesDoPedido: restricoesDoPedido
+    esqueleto: esqueleto, pedrosaInicial: pedrosaInicial, garantirSemana: garantirSemana, gravarSemana: gravarSemana, dadosPara: dadosPara, contexto: contexto,
+    estoqueDaSemana: estoqueDaSemana, esperarFila: esperarFila, montarPeloMotor: montarPeloMotor, proporComLlm: proporComLlm, aplicarPedidos: aplicarPedidos,
+    diasComPedido: diasComPedido, restricoesDoPedido: restricoesDoPedido, avisoDaFalha: avisoDaFalha
   };
 })(this);
 
@@ -6554,12 +6747,12 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   // memória da tela (não é dado da família): o que está montando, aplicando e o último resultado
   var T = App.planejamento = App.planejamento || { montando: null, aplicando: null, resultado: null, aviso: null };
 
-  // qual semana o planejamento abre: a que já está em planejamento; senão a desta semana (se ainda não existe e é
-  // começo de semana) ou a próxima segunda (sugestão Claude · validar)
+  // qual semana o planejamento abre: a que já está em planejamento; senão a PRÓXIMA semana (a que começa na próxima segunda, dia
+  // de início de semana do contrato: C.DIAS[0]); se já está aprovada, a seguinte. D12: a semana em curso já começou, então segunda
+  // à noite não planeja a semana de hoje (entrega e tarefas no passado). Só se a pessoa pediu ("Planejar a semana de <data>" na aba
+  // Esta semana): a ação cria a semana, e ela passa a ser a "em planejamento" acima.
   function alvo() {
     var w = E().semanaEmPlanejamento(); if (w) return w.inicio;
-    var seg = B.segundaDe(B.hojeIso());
-    if (!E().semana(seg) && B.indiceDia(B.hojeIso()) <= 2) return seg;
     var x = E().proximaSegunda();
     while (E().aprovada(E().semana(x))) x = B.somarDias(x, 7); // semana já aprovada: planeja a seguinte
     return x;
@@ -6569,57 +6762,70 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     return App.sync.enfileirar('semana_estado', Object.assign({ inicio: inicio, de: w.estado, para: para }, extra || {}));
   }
   // "Montar o pré-cardápio" (Contexto) e "Outra proposta": motor sempre; LLM quando a chave do Config está ligada
+  // opts.semente: semente da "Outra proposta" · opts.contarProposta: valor de propostas_usadas a gravar (D2: só quando a proposta
+  // chegou; se a IA falhou e o motor entrou no lugar, a proposta NÃO é gasta)
   function montar(inicio, opts) {
     opts = opts || {};
     var llm = E().config('modo_llm') === 'ligado' && !opts.forcarMotor;
-    var tarefa = T.montando = { inicio: inicio, modo: llm ? 'llm' : 'motor', desde: Date.now(), cancelado: false };
+    var tarefa = T.montando = { inicio: inicio, modo: llm ? 'llm' : 'motor', desde: Date.now(), cancelado: false, semente: opts.semente, contarProposta: opts.contarProposta };
     T.resultado = null; T.aviso = opts.aviso || null;
     App.ui.ir('#precardapio');
-    var semente = opts.semente;
+    var semente = opts.semente, falhou = false;
     var passo = P.garantirSemana(inicio).then(function () {
       var w = E().semana(inicio);
       return w && w.estado === 'estoque' ? transitar(inicio, 'pre_cardapio') : null;
     });
     return passo.then(function () {
       if (!llm) return new Promise(function (ok) { setTimeout(function () { ok({ semana: P.montarPeloMotor(inicio, semente), origem: 'motor' }); }, 350); });
-      return P.proporComLlm(inicio);
+      return P.proporComLlm(inicio, null, null, { semente: semente });
     }).then(function (r) {
       if (tarefa.cancelado) return;
       T.aviso = r.aviso || opts.aviso || null;
+      falhou = r.origem === 'motor' && !!r.erro;
       // proposta nova: os pedidos voltam a valer como pendentes (quem quiser, aplica de novo)
       r.semana.pedidos_aplicados_em = null;
-      return P.gravarSemana(inicio, r.semana, 'precardapio');
+      return P.gravarSemana(inicio, r.semana, 'precardapio').then(function () {
+        if (opts.contarProposta != null && !falhou) return App.sync.enfileirar('semana_patch', { inicio: inicio, caminho: 'propostas_usadas', valor: opts.contarProposta });
+      });
     }).catch(function (e) {
       console.warn('montar:', e && e.message); T.erro = 'Não consegui montar a proposta.';
     }).then(function () { if (T.montando === tarefa) T.montando = null; App.ui.render(true); });
   }
-  // "Usar o motor agora" (depois de 20 s montando com o LLM)
+  // "Usar o motor agora" (depois de 20 s montando com o LLM): a semente e a contagem da proposta seguem com a tarefa cancelada
   function usarMotorAgora() {
     var t = T.montando; if (!t) return;
     t.cancelado = true; T.montando = null;
-    return montar(t.inicio, { forcarMotor: true, aviso: 'Montei com o motor enquanto o ' + (E().config('llm_provedor') === 'gemini' ? 'Gemini' : 'Claude') + ' não respondia.' });
+    return montar(t.inicio, { forcarMotor: true, semente: t.semente, contarProposta: t.contarProposta, aviso: 'Montei com o motor enquanto o ' + (E().config('llm_provedor') === 'gemini' ? 'Gemini' : 'Claude') + ' não respondia.' });
   }
   function outraProposta(inicio) {
     var w = E().semana(inicio), usadas = Number(w.sem.propostas_usadas || 0);
     if (usadas >= C.TETO_PROPOSTAS - 1) return Promise.resolve(false);
-    return App.sync.enfileirar('semana_patch', { inicio: inicio, caminho: 'propostas_usadas', valor: usadas + 1 }).then(function () {
-      return montar(inicio, { semente: inicio + '#' + (usadas + 1) });
-    });
+    return montar(inicio, { semente: inicio + '#' + (usadas + 1), contarProposta: usadas + 1 });
   }
-  function aplicar(inicio, volta, soDias) {
+  // opts.semLlm (D3): refaz sem esperar a IA. A tarefa anterior (cancelada) ignora a resposta tardia.
+  function aplicar(inicio, volta, soDias, opts) {
+    opts = opts || {};
     var w = E().semana(inicio), res = App.comp.resumoPedidos(w.sem);
-    T.aplicando = { inicio: inicio, dias: soDias || res.dias, volta: volta || '#precardapio/resultado' };
+    var ap = T.aplicando = { inicio: inicio, dias: soDias || res.dias, soDias: soDias || null, volta: volta || '#precardapio/resultado', desde: Date.now(), cancelado: false };
     App.ui.render(true);
-    return P.aplicarPedidos(inicio, null, soDias).then(function (r) {
+    return P.aplicarPedidos(inicio, null, soDias, { semLlm: !!opts.semLlm }).then(function (r) {
+      if (ap.cancelado) return null;
       T.aviso = r.aviso || null;
       r.semana.pedidos_aplicados_em = B.agoraIso(); // desvio: marca quando os pedidos foram aplicados (a tela deixa de pedir "Aplicar")
       return P.gravarSemana(inicio, r.semana, (volta || '#precardapio').replace('#', '').split('/')[0]).then(function () { return r; });
     }).then(function (r) {
+      if (!r || ap.cancelado) return;
       T.resultado = { inicio: inicio, itens: r.resultado || [], recusas: r.recusas || [] };
       T.aplicando = null;
       App.ui.ir(volta || '#precardapio/resultado');
       App.ui.render(true);
-    }, function (e) { T.aplicando = null; T.erro = 'Não consegui aplicar os pedidos.'; console.warn('aplicar:', e && e.message); App.ui.render(true); });
+    }, function (e) { if (ap.cancelado) return; T.aplicando = null; T.erro = 'Não consegui aplicar os pedidos.'; console.warn('aplicar:', e && e.message); App.ui.render(true); });
+  }
+  // D3 · "Cancelar e usar o motor": a espera da IA acaba, os pedidos saem pelo motor e pelos atalhos
+  function cancelarAplicar() {
+    var a = T.aplicando; if (!a) return Promise.resolve();
+    a.cancelado = true;
+    return aplicar(a.inicio, a.volta, a.soDias, { semLlm: true });
   }
   // Aprovar (R39, R40, R37, R41b): estado aprovada com alertas aceitos e cópia do estoque; lista_aprovada; receitas novas no Livro
   function aprovar(inicio) {
@@ -6636,8 +6842,9 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     }).then(function () { T.aprovando = null; App.ui.ir('#entregas/' + inicio); });
   }
 
-  P.alvo = alvo; P.transitar = transitar; P.montar = montar; P.usarMotorAgora = usarMotorAgora; P.outraProposta = outraProposta; P.aplicar = aplicar; P.aprovar = aprovar;
+  P.alvo = alvo; P.transitar = transitar; P.montar = montar; P.usarMotorAgora = usarMotorAgora; P.outraProposta = outraProposta; P.aplicar = aplicar; P.cancelarAplicar = cancelarAplicar; P.aprovar = aprovar;
   App.acoes = App.acoes || {};
+  App.acoes['cancelar-aplicar'] = function () { cancelarAplicar(); };
   App.acoes['aplicar-pedidos'] = function (b) { var so = b.getAttribute('data-so'); aplicar(b.getAttribute('data-inicio'), b.getAttribute('data-volta'), so ? so.split(',') : null); };
 })(this);
 
@@ -6662,12 +6869,20 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     if (s.estado === 'sem_rede') return '<a class="sync off" id="sync-pill" href="#' + rotaAtual() + '" aria-label="Sem rede' + (n ? ', ' + n + ' alterações na fila' : '') + '">' + ic('wifioff') + 'Sem rede' + (n ? ' · ' + n + ' na fila' : '') + '</a>';
     if (s.estado === 'enviando') return '<span class="sync busy" id="sync-pill" role="status">' + ic('refresh') + 'Sincronizando…</span>';
     if (s.estado === 'conflito') return '<span class="sync err" id="sync-pill" role="status">' + ic('alert') + 'Não sincronizou</span>';
+    if (s.estado === 'falhou') return '<a class="sync err" id="sync-pill" href="#' + rotaAtual() + '" data-acao="sync-tentar" role="status">' + ic('alert') + 'Não sincronizou' + (n ? ' · ' + n + ' na fila' : '') + '</a>';
+    // D7: fila pendente nunca aparece como "Sincronizado". Sem login que valha, a fila espera até entrar de novo.
+    if (n && !App.login.pode()) return '<a class="sync err" id="sync-pill" href="#entrar" role="status">' + ic('alert') + n + ' na fila · entre de novo</a>';
+    if (n) return '<span class="sync busy" id="sync-pill" role="status">' + ic('refresh') + 'Sincronizando…</span>';
     return '<span class="sync ok" id="sync-pill" role="status">' + ic('cloud') + (s.ultima_em ? 'Sincronizado ' + B().horaTexto(s.ultima_em) : 'Sincronizado: nunca') + '</span>';
   }
   function faixaSync() {
     var s = App.sync.st, n = App.sync.pendentes();
     if (s.estado === 'conflito') {
-      return '<div class="note w" role="alert" id="faixa-sync">' + ic('alert') + '<span class="nota-acao"><span>' + esc(App.sync.textoConflito()) + '</span> <button class="lnk" data-acao="aceitar-conflito">Usar a do outro celular</button></span></div>';
+      // só oferece "a do outro celular" quando houve conflito de verdade (D13); recusa por outro motivo só se dispensa
+      return '<div class="note w" role="alert" id="faixa-sync">' + ic('alert') + '<span class="nota-acao"><span>' + esc(App.sync.textoConflito()) + '</span> <button class="lnk" data-acao="aceitar-conflito">' + (App.sync.temConflitoReal() ? 'Usar a do outro celular' : 'Entendi') + '</button></span></div>';
+    }
+    if (s.estado === 'falhou') {
+      return '<div class="note w" role="alert" id="faixa-sync">' + ic('alert') + '<span class="nota-acao"><span>' + esc(App.sync.textoErroEnvio()) + '</span> <button class="lnk" data-acao="sync-tentar">Tentar de novo</button></span></div>';
     }
     if (s.estado === 'sem_rede') {
       return '<div class="note a" role="status" id="faixa-sync">' + ic('wifioff') + '<span>Sem rede. O app segue igual' +
@@ -6774,6 +6989,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     if (!t) return;
     var a = t.getAttribute('data-acao');
     if (a === 'aceitar-conflito') { e.preventDefault(); App.sync.aceitarConflitos(); return; }
+    if (a === 'sync-tentar') { e.preventDefault(); App.sync.tentarDeNovo(); return; }
     if (a === 'fechar-folha') { e.preventDefault(); fecharFolha(); return; }
     var h = App.acoes && App.acoes[a];
     if (h) { e.preventDefault(); h(t, e); }
@@ -6811,7 +7027,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       App.sync.ligarGatilhos();
       root.addEventListener('hashchange', function () { fecharFolha(); render(); });
       render();
-      if (App.login.token()) {
+      if (App.login.pode()) { // sessão própria válida (ou token do Google ainda vivo): entra direto, sem One Tap
         return App.sync.carregar(false).then(function () { transicoesAutomaticas(); if (App.sync.pendentes()) App.sync.agendarEnvio(0); }, function () { render(true); });
       }
       if (App.login.estado() === 'vencido' && navOnline()) {
@@ -6870,6 +7086,11 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       h += '<button class="gbtn" data-acao="entrar-falso">' + GLOGO + 'Entrar com Google</button>';
     } else {
       h += '<div class="gis" id="gis-botao"><span class="mut small">Carregando o botão do Google…</span></div>';
+    }
+    // D7: a fila não se perde; o aviso diz quantas alterações esperam o login
+    var fila = App.sync.pendentes();
+    if (fila && e !== 'conferindo') {
+      h += '<div class="note a" role="status" id="aviso-fila">' + ic('clock') + '<span>' + fila + (fila === 1 ? ' alteração esperando' : ' alterações esperando') + ': entre de novo para enviar.</span></div>';
     }
     if (e === 'sem_acesso') {
       h += '<div class="note w" role="alert">' + ic('alert') + '<span>Este e-mail não tem acesso: <b>' + esc(App.login.email() || '') + '</b><br>Só as contas do Tobia e da Geovana entram.</span></div>' +
@@ -7210,8 +7431,8 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     h += K().legendHTML();
     // R41: só contam pedidos de dias que ainda não passaram (o pedido da semana é do planejamento, não da edição em curso)
     var editaveis = edicao ? dias.filter(function (d) { return d.jantar && podeEditar(w, d.i).pode; }).map(function (d) { return d.id; }) : [];
-    var corte = [w.sem.aprovada_em, w.sem.pedidos_aplicados_em].filter(Boolean).sort().pop() || '';
-    var diasPed = editaveis.filter(function (id) { var p = (w.sem.pedidos || {})[id]; return K().temPedido(p) && String(p.em || '') > corte && !(w.sem.dias_travados || {})[id]; });
+    var corte = [w.sem.aprovada_em, w.sem.pedidos_aplicados_em].filter(Boolean).sort(B.cmpTempo).pop() || '';
+    var diasPed = editaveis.filter(function (id) { var p = (w.sem.pedidos || {})[id]; return K().temPedido(p) && B.depois(p.em, corte) && !(w.sem.dias_travados || {})[id]; });
     var res = { tem: diasPed.length > 0, dias: diasPed, texto: B.plural(diasPed.length, 'dia', 'dias') + ' com pedido' };
     h += '<div class="board" style="margin-top:4px">' + dias.map(function (d) {
       var o = { today: d.iso === hoje, issues: K().issuesDoDia(calc, d).map(function (x) { return edicao && x.s === 'falha' ? { s: 'alerta', t: x.t } : x; }) };
@@ -7248,8 +7469,9 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
 /* app/telas/estoque.js · Estoque, passo 1 de 5 (LEIA.md §4 + M4, SPEC §5 Estoque). Rotas #estoque e #estoque/congelador.
  * Foto → llm_ler_foto (Gemini, ADR-019) com a imagem reduzida no celular (≤ 1600 px, JPEG); nada é gravado antes de
  * "Confirmar" (ops estoque_upsert + estoque_confirmar). Caixa de texto grava sozinha como Config.estoque_rascunho
- * ("Rascunho salvo hh:mm", M4). "Ler o texto": o contrato não tem leitura de texto no servidor; o aparelho casa os nomes
- * do catálogo no texto (sugestão Claude · validar; pendência registrada). Áudio: o microfone do teclado do celular.
+ * ("Rascunho salvo hh:mm", M4). "Ler o texto": o contrato não tem leitura de texto no servidor; o aparelho lê o texto
+ * cláusula por cláusula (vírgula, ponto e vírgula, linha, " e ") e casa cada uma com o catálogo por palavra-chave, com
+ * quantidade e lugar procurados só na própria cláusula (sugestão Claude · validar; pendência registrada). Áudio: o microfone do teclado do celular.
  * Estoque vivo (aba Estoque) + congelador (Movimentos) em #estoque/congelador.
  * Sem template literal (crase).
  */
@@ -7292,7 +7514,9 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
         [1, 2, 3].map(function () { return '<div class="sk" style="height:64px;margin-top:8px"></div>'; }).join('') };
     }
     if (L.estado === 'erro') {
-      return { nav: null, flow: true, temDado: true, html: h + App.ui.empty('alert', 'Não consegui ler a foto.', 'Tente com mais luz e a porta toda aberta, ou digite a lista.', '<div class="btrow" style="max-width:420px;margin:0 auto"><label class="bt pri" for="foto-in">' + ic('cam') + 'Outra foto</label><button class="bt sec" data-acao="estoque-texto">' + ic('txt') + 'Digitar</button></div>', true) + '<input type="file" id="foto-in" accept="image/*" capture="environment" class="sr" tabindex="-1">', after: ligarFoto };
+      var doTexto = L.fonte === 'texto';
+      return { nav: null, flow: true, temDado: true, html: h + App.ui.empty('alert', doTexto ? 'Não consegui ler o texto.' : 'Não consegui ler a foto.',
+        doTexto ? 'Escreva um item por vírgula, com o nome simples e, se quiser, a quantidade e o lugar. Ex.: 2 kg de batata na despensa.' : 'Tente com mais luz e a porta toda aberta, ou digite a lista.', '<div class="btrow" style="max-width:420px;margin:0 auto"><label class="bt pri" for="foto-in">' + ic('cam') + 'Outra foto</label><button class="bt sec" data-acao="estoque-texto">' + ic('txt') + 'Digitar</button></div>', true) + '<input type="file" id="foto-in" accept="image/*" capture="environment" class="sr" tabindex="-1">', after: ligarFoto };
     }
     h += inputs;
     if (L.texto) {
@@ -7305,9 +7529,10 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     if (L.itens.length) {
       var nProv = L.itens.filter(function (e) { return e.certeza === 'provavel'; }).length;
       h += '<div class="row" style="margin-top:20px;justify-content:space-between"><b style="font-size:19px">Lido ' + (L.fonte === 'texto' ? 'do texto' : 'da foto') + ' de ' + B.horaTexto(L.em) + '</b></div><p class="mut small" style="margin:4px 0 0">Confirme o que é "provável". Vencimento puxa o cardápio.</p>' + grupos(L.itens, true);
+      if ((L.nao_lidos || []).length) h += '<div class="note a" role="status" id="nao-lidos">' + ic('alert') + '<span>Não achei no catálogo: <b>' + L.nao_lidos.map(esc).join(', ') + '</b>. Escreva de outro jeito e leia de novo, ou siga sem eles.</span></div>';
       h += '<div class="dock"><div class="in"><div class="sum">' + B.plural(L.itens.length, 'item', 'itens') + (nProv ? ' · ' + nProv + ' para confirmar' : '') + '</div><div class="btrow" style="margin-top:0"><button class="bt sec" data-acao="estoque-descartar">Descartar</button><button class="bt pri" data-acao="estoque-confirmar">Confirmar</button></div></div></div>';
     } else if (vivo.length) {
-      h += '<div class="row" style="margin-top:20px;justify-content:space-between"><b style="font-size:19px">Em casa' + (lido ? ' · ' + (fonte === 'nada_novo' ? 'conferido' : 'lido') + ' ' + B.ddmm(String(lido).slice(0, 10)) + ' ' + B.horaTexto(lido) : '') + '</b></div>' + grupos(vivo.map(function (e) { return { ingrediente_id: e.ingrediente_id, local: e.local, quantidade: e.quantidade, unidade: e.unidade, certeza: e.certeza, vence_em: e.vence_em }; }), false);
+      h += '<div class="row" style="margin-top:20px;justify-content:space-between"><b style="font-size:19px">Em casa' + (lido ? ' · ' + (fonte === 'nada_novo' ? 'conferido' : 'lido') + ' ' + B.ddmm(B.dataLocal(lido)) + ' ' + B.horaTexto(lido) : '') + '</b></div>' + grupos(vivo.map(function (e) { return { ingrediente_id: e.ingrediente_id, local: e.local, quantidade: e.quantidade, unidade: e.unidade, certeza: e.certeza, vence_em: e.vence_em }; }), false);
       h += '<div class="dock"><div class="in"><div class="btrow" style="margin-top:0"><button class="bt sec" data-acao="estoque-nada-novo">Nada novo</button><a class="bt pri" href="#contexto">Seguir</a></div></div></div>';
     } else {
       h += App.ui.empty('box', 'Nada informado ainda.', 'Sem estoque, a lista de compras não desconta nada.', '<button class="bt sec big" data-acao="estoque-nada-novo">Nada novo nesta semana</button>');
@@ -7316,16 +7541,16 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   };
 
   function congelador() {
-    var vivo = E().estoqueVivo().filter(function (e) { return e.local === 'congelador'; }), mov = E().movimentos().slice().sort(function (a, b) { return String(b.em).localeCompare(String(a.em)); }).slice(0, 12);
+    var vivo = E().estoqueVivo().filter(function (e) { return e.local === 'congelador'; }), mov = E().movimentos().slice().sort(function (a, b) { return B.cmpTempo(b.em, a.em); }).slice(0, 12);
     var h = '<div class="flowbar"><a class="x" href="#estoque" aria-label="Voltar">' + ic('x') + '</a><div class="t"><b>Estoque</b><h1>Congelador</h1></div></div>' + App.ui.faixaSync();
     h += '<p class="mut" style="margin:4px 0 12px">Inventário vivo: o batch entra, o jantar tira.</p>';
     h += vivo.length ? vivo.map(function (e) {
       var cat = V().ing(e.ingrediente_id) ? V().catDe({ componentes: { proteina: e.ingrediente_id } }) : 'livre';
-      return '<div class="item"><span class="thumb" style="--c:' + V().corVar(cat) + ';flex-basis:48px;height:48px;border-radius:12px">' + ic('snow') + '</span><div class="grow"><div class="nm">' + esc(V().curto(e.ingrediente_id)) + '</div><div class="sb">' + (e.atualizado_em ? 'atualizado ' + B.ddmm(String(e.atualizado_em).slice(0, 10)) : 'do estoque') + '</div></div><div class="q" data-q="estoque">' + esc(qtd(e.quantidade, e.unidade)) + '</div></div>';
+      return '<div class="item"><span class="thumb" style="--c:' + V().corVar(cat) + ';flex-basis:48px;height:48px;border-radius:12px">' + ic('snow') + '</span><div class="grow"><div class="nm">' + esc(V().curto(e.ingrediente_id)) + '</div><div class="sb">' + (e.atualizado_em ? 'atualizado ' + B.ddmm(B.dataLocal(e.atualizado_em)) : 'do estoque') + '</div></div><div class="q" data-q="estoque">' + esc(qtd(e.quantidade, e.unidade)) + '</div></div>';
     }).join('') : App.ui.empty('snow', 'Congelador vazio', 'Nada congelado no estoque vivo.', '');
     h += '<h2 class="t">Movimento</h2><div class="card">' + (mov.length ? '<ul class="chk">' + mov.map(function (m) {
       var ent = Number(m.delta) > 0;
-      return '<li><span class="s"><span class="pill ' + (ent ? 'ok' : 'na') + '">' + (ent ? 'entrou' : 'saiu') + '</span></span><span data-q="estoque">' + esc(qtd(Math.abs(m.delta), m.unidade) + ' de ' + V().curto(m.ingrediente_id)) + '<small>' + esc(B.diaMinusculo(String(m.em).slice(0, 10)) + ' ' + B.ddmm(String(m.em).slice(0, 10)) + (m.motivo ? ', ' + m.motivo : '')) + '</small></span></li>';
+      return '<li><span class="s"><span class="pill ' + (ent ? 'ok' : 'na') + '">' + (ent ? 'entrou' : 'saiu') + '</span></span><span data-q="estoque">' + esc(qtd(Math.abs(m.delta), m.unidade) + ' de ' + V().curto(m.ingrediente_id)) + '<small>' + esc(B.diaMinusculo(B.dataLocal(m.em)) + ' ' + B.ddmm(B.dataLocal(m.em)) + (m.motivo ? ', ' + m.motivo : '')) + '</small></span></li>';
     }).join('') + '</ul>' : '<p class="mut" style="margin:0">Sem movimento</p>') + '</div>';
     return { nav: null, flow: true, html: h, temDado: true, titulo: 'Congelador' };
   }
@@ -7358,37 +7583,82 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
         return { ingrediente_id: x.ingrediente_id, nome_lido: x.nome_lido, local: x.local || 'geladeira', quantidade: x.quantidade || 1, unidade: x.unidade || 'un', certeza: x.certeza || 'provavel', vence_em: x.vence_em || null };
       });
       L.em = B.agoraIso(); L.estado = null;
-    }).catch(function () { L.estado = 'erro'; }).then(function () { App.ui.render(true); });
+    }).catch(function () { L.estado = 'erro'; L.fonte = 'foto'; }).then(function () { App.ui.render(true); });
   }
-  // texto: casa nomes do catálogo e quantidades simples (sugestão Claude · validar; o contrato não tem leitura de texto)
-  function lerTexto(txt) {
-    var norm = function (s) { return String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); };
-    var t = norm(txt), achados = [];
-    E().ingredientes().slice().sort(function (a, b) { return V().curto(b.id).length - V().curto(a.id).length; }).forEach(function (i) {
-      var nome = norm(V().curto(i.id)).replace(/\s+(seco|seca|secos|cozido|cozida|fresco|fresca|congelado|congelada|em conserva|integral|picado|picada)$/, ''); if (nome.length < 4) return;
-      var p = t.indexOf(nome); if (p < 0 || achados.some(function (a) { return a.pos === p; })) return;
-      var trecho = t.slice(Math.max(0, p - 25), p + nome.length + 40), m = /(\d+(?:[.,]\d+)?)\s*(kg|g|un|unidades?|pacotes?)?/.exec(trecho);
-      var q = m ? Number(m[1].replace(',', '.')) : 1, un = m && m[2] ? (m[2] === 'kg' ? 'kg' : m[2] === 'g' ? 'g' : 'un') : 'un';
-      if (un === 'kg') { q = q * 1000; un = 'g'; }
-      var local = /congelad/.test(trecho) ? 'congelador' : /geladeira/.test(trecho) ? 'geladeira' : 'despensa';
-      achados.push({ pos: p, ingrediente_id: i.id, local: local, quantidade: q, unidade: un, certeza: 'provavel', vence_em: null });
+  // ---------- texto → itens (sugestão Claude · validar; o contrato não tem leitura de texto) ----------
+  // Cada cláusula (vírgula, ponto e vírgula, linha, " e ") é lida sozinha: a quantidade e o lugar vêm só dela, e o item
+  // do catálogo é o que tem mais palavras-chave em comum com ela. O que não casa volta em "nao_lidos" (nunca some calado).
+  var PARADAS = {};
+  'a o as os um uma uns umas de da do das dos com sem em no na nos nas ao aos para por e ou grande grandes pequeno pequena pequenos pequenas medio media meio meia pouco pouca bem ainda tem tenho sobrou restou resto restinho natural mais menos cerca uns umas pacote pacotes caixa caixas lata latas pote potes maco macos embalagem embalagens kg g gr gramas grama quilo quilos kilo l litro litros ml un unidade unidades geladeira congelador congelado congelada congelados congeladas freezer despensa armario'.split(' ').forEach(function (w) { PARADAS[w] = 1; });
+  var MOLES = { seco: 1, seca: 1, secos: 1, secas: 1, cozido: 1, cozida: 1, fresco: 1, fresca: 1, conserva: 1, integral: 1, picado: 1, picada: 1, desidratado: 1, desidratada: 1, ao: 1 };
+  var NUM_EXT = { meio: 0.5, meia: 0.5, um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10, duzia: 12 };
+  function norm(s) { return String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  function radical(w) {
+    if (w.length > 4 && /oes$/.test(w)) return w.slice(0, -3) + 'ao';
+    if (w.length > 4 && /ais$/.test(w)) return w.slice(0, -2) + 'al';
+    if (w.length > 3 && /s$/.test(w) && !/ss$/.test(w)) return w.slice(0, -1);
+    return w;
+  }
+  function palavras(s) { return norm(s).split(/[^a-z0-9]+/).filter(Boolean); }
+  function chaves(i) {
+    return palavras(V().curto(i.id)).filter(function (w) { return !PARADAS[w] && !MOLES[w] && !/^\d+$/.test(w) && w.length >= 3; }).map(radical);
+  }
+  // lugar quando a frase não diz: o que estraga vai para a geladeira, o resto para a despensa
+  function localPadrao(i) {
+    if (/^(carbo|leguminosa|tempero|mercearia|gordura|semente_castanha|bebida|suplemento)$/.test(i.categoria || '')) return 'despensa';
+    return i.perecivel_dias != null ? 'geladeira' : 'despensa';
+  }
+  function lerClausula(c, catalogo) {
+    var t = norm(c).replace(/\d+(?:[.,]\d+)?\s*%/g, ' ');
+    var local = /congelad|freezer/.test(t) ? 'congelador' : /geladeira|frigo|refrigerad/.test(t) ? 'geladeira' : /despensa|armario|prateleira/.test(t) ? 'despensa' : null;
+    var q = 1, un = null, m = /(?:^|[^a-z0-9])(\d+(?:[.,]\d+)?|meio|meia|uma|um|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|duzia)\s*(kg|quilos?|kilos?|gramas?|gr|g|litros?|ml|l|unidades?|un|pacotes?|caixas?|latas?|potes?|macos?|embalagens?)?(?![a-z0-9])/.exec(t);
+    if (m) { q = NUM_EXT[m[1]] != null ? NUM_EXT[m[1]] : Number(m[1].replace(',', '.')); un = m[2] || null; }
+    var ps = palavras(t).filter(function (w) { return !/^\d+$/.test(w); }), duras = [], moles = {};
+    ps.forEach(function (w) { if (MOLES[w] || /^congelad/.test(w)) moles[radical(w)] = 1; if (!PARADAS[w] && !MOLES[w] && w.length >= 3) duras.push(radical(w)); });
+    var melhor = null;
+    catalogo.forEach(function (x, k) {
+      var hit = x.chaves.filter(function (w) { return duras.indexOf(w) >= 0; }).length;
+      if (!hit) return;
+      var extra = palavras(V().curto(x.ing.id)).filter(function (w) { return moles[radical(w)]; }).length;
+      var pts = [hit, extra, -x.chaves.length, -k];
+      if (!melhor || pts[0] > melhor.pts[0] || (pts[0] === melhor.pts[0] && (pts[1] > melhor.pts[1] || (pts[1] === melhor.pts[1] && (pts[2] > melhor.pts[2]))))) melhor = { ing: x.ing, pts: pts };
     });
-    return achados;
+    if (!melhor) return null;
+    var ing = melhor.ing, medida = !un ? null : /^(kg|quilo|kilo)/.test(un) ? 'kg' : /^(g|gr|grama)/.test(un) ? 'g' : /^(l|litro)/.test(un) ? 'l' : un === 'ml' ? 'ml' : /^(un|unidade)/.test(un) ? 'un' : 'emb';
+    if (medida === 'kg') { q = q * 1000; medida = 'g'; }
+    if (medida === 'emb' && !ing.embalagem_g) medida = 'un'; // sem tamanho de embalagem no catálogo: conta como unidade
+    if (!medida) medida = 'un';
+    return { ingrediente_id: ing.id, local: local || localPadrao(ing), quantidade: Math.round(q * 1000) / 1000, unidade: medida, certeza: 'provavel', vence_em: null };
   }
+  // devolve { itens: [...], nao_lidos: ['trecho', ...] }
+  function lerTexto(txt) {
+    var catalogo = E().ingredientes().map(function (i) { return { ing: i, chaves: chaves(i) }; });
+    var itens = [], vistos = {}, nao = [];
+    String(txt).split(/[,;\n]+|\s+e\s+/i).forEach(function (c) {
+      c = c.trim(); if (!c) return;
+      var it = lerClausula(c, catalogo);
+      if (!it) { nao.push(c); return; }
+      if (vistos[it.ingrediente_id + '|' + it.local]) return;
+      vistos[it.ingrediente_id + '|' + it.local] = 1; itens.push(it);
+    });
+    return { itens: itens, nao_lidos: nao };
+  }
+  App.estoqueTexto = { ler: lerTexto };
 
-  App.acoes['estoque-texto'] = function () { L.texto = true; App.ui.render(true); setTimeout(function () { var t = B.$('#txtin'); if (t) t.focus(); }, 50); };
-  App.acoes['estoque-audio'] = function () { L.texto = true; App.ui.render(true); setTimeout(function () { var t = B.$('#txtin'); if (t) { t.placeholder = 'Toque no microfone do teclado e fale o que tem em casa'; t.focus(); } }, 50); };
+  App.acoes['estoque-texto'] = function () { L.estado = null; L.texto = true; App.ui.render(true); setTimeout(function () { var t = B.$('#txtin'); if (t) t.focus(); }, 50); };
+  App.acoes['estoque-audio'] = function () { L.estado = null; L.texto = true; App.ui.render(true); setTimeout(function () { var t = B.$('#txtin'); if (t) { t.placeholder = 'Toque no microfone do teclado e fale o que tem em casa'; t.focus(); } }, 50); };
   App.acoes['estoque-ler-texto'] = function () {
     var t = B.$('#txtin'), txt = t ? t.value : '';
     L.estado = 'lendo'; L.fonte = 'texto'; App.ui.render(true);
     setTimeout(function () {
-      var it = lerTexto(txt);
-      if (!it.length) { L.estado = 'erro'; } else { L.itens = it; L.em = B.agoraIso(); L.estado = null; }
+      var r = lerTexto(txt);
+      L.nao_lidos = r.nao_lidos;
+      if (!r.itens.length) { L.estado = 'erro'; } else { L.itens = r.itens; L.em = B.agoraIso(); L.estado = null; }
       App.ui.render(true);
     }, 300);
   };
   App.acoes['estoque-sim'] = function (b) { var e = L.itens[+b.getAttribute('data-k')]; if (e) e.certeza = 'certo'; App.ui.render(true); };
-  App.acoes['estoque-descartar'] = function () { L.itens = []; App.ui.render(true); };
+  App.acoes['estoque-descartar'] = function () { L.itens = []; L.nao_lidos = []; L.estado = null; App.ui.render(true); };
   App.acoes['estoque-confirmar'] = function () {
     var cad = Promise.resolve(), vivo = E().estoqueVivo();
     L.itens.forEach(function (e) {
@@ -7406,6 +7676,8 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   App.acoes['estoque-nada-novo'] = function () {
     App.ui.gravar('estoque_confirmar', { em: B.agoraIso(), fonte: 'nada_novo', nada_novo: true }, 'contexto').then(function () { App.ui.ir('#contexto'); });
   };
+  // o erro de leitura não prende a tela: sair do Estoque (ou trocar de rota) o apaga (D4)
+  root.addEventListener('hashchange', function () { if (L.estado === 'erro') L.estado = null; });
   // rascunho da caixa livre: grava sozinho (M4) 800 ms depois de parar de digitar
   var tmr = null;
   root.document.addEventListener('input', function (e) {
@@ -7521,6 +7793,8 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
 /* app/telas/precardapio.js · Pré-cardápio, passo 3 de 5 (LEIA.md §5 + M3/M4, SPEC §5 e §12). Rotas #precardapio e
  * #precardapio/resultado. Estados: montando (motor "Montando a proposta…"; LLM "Montando com o Claude…" e, depois de 20 s,
  * "Usar o motor agora"), aplicando ("Aplicando seus pedidos…"), resultado ("O que mudou"), vazio, erro, ok.
+ * Espera da IA (montar e aplicar pedidos): contador de segundos e "costuma levar de 30 s a 2 min"; aos 20 s o botão de saída
+ * ("Usar o motor agora" / "Cancelar e usar o motor"). Semana sem jantares fora de uma montagem = "a montagem foi interrompida".
  * Regra dura R36: a tela só mostra a semana que voltou do motor (conferirProposta); recusas do LLM escritas por dia
  * ("O Claude sugeriu X; não serve porque Y; ficou Z."), receita inventada com selo "nova".
  * Sem template literal (crase).
@@ -7535,27 +7809,52 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   function nomeRec(id) { var r = E().mapaRec()[id]; return r ? B.partes(r.nome)[0] : (id || 'jantar livre'); }
   function juntar(a) { return a.length > 1 ? a.slice(0, -1).join(', ') + ' e ' + a[a.length - 1] : (a[0] || ''); }
 
+  // D15: o tempo que a pessoa já esperou (atualiza a cada segundo) e quanto costuma levar
+  function espera(seg, frase) { return '<br><span class="small mut">Esperando há <b id="espera-seg">' + seg + ' s</b> · ' + frase + '.</span>'; }
+  // um relógio só: reescreve o contador a cada segundo e revela o botão de saída aos 20 s; some sozinho quando a tela muda
+  function contador(desde, botao) {
+    var t = T();
+    clearInterval(t.tick);
+    function passo() {
+      var el = B.$('#espera-seg');
+      if (!el) { clearInterval(t.tick); return; }
+      var seg = Math.max(0, Math.round((Date.now() - desde) / 1000));
+      el.textContent = seg + ' s';
+      var b = B.$(botao); if (b && seg >= 20) b.hidden = false;
+    }
+    t.tick = setInterval(passo, 1000);
+    passo();
+  }
+
   App.telas.precardapio = function (st) {
     var inicio = App.planejar.alvo(), w = E().semana(inicio), t = T();
     var h = App.ui.flowTop(2, 'Proposta de 7 jantares', inicio, '#semana' + (inicio > B.segundaDe(B.hojeIso()) ? '/proxima' : ''));
     if (t.montando && t.montando.inicio === inicio) {
       var llm = t.montando.modo === 'llm', seg = Math.round((Date.now() - t.montando.desde) / 1000);
       h += '<div class="stat" role="status"><span class="ico b">' + ic('refresh') + '</span><div><h2>' + (llm ? 'Montando com o ' + nomeProv() + '…' : 'Montando a proposta…') + '</h2><p>' +
-        (llm ? 'O ' + nomeProv() + ' propõe; o motor confere o plano antes de você ver.' : 'Plano, metas, estoque, janelas e variedade.') + '</p></div></div>' +
+        (llm ? 'O ' + nomeProv() + ' propõe; o motor confere o plano antes de você ver.' + espera(seg, 'costuma levar de 30 s a 2 min') : 'Plano, metas, estoque, janelas e variedade.') + '</p></div></div>' +
         (llm ? '<button class="bt sec big full" style="margin-top:10px" data-acao="usar-motor" id="usar-motor"' + (seg < 20 ? ' hidden' : '') + '>Usar o motor agora</button>' : '') +
         [1, 2, 3, 4, 5, 6, 7].map(function () { return '<div class="sk" style="height:96px;margin-top:10px"></div>'; }).join('');
-      return { nav: null, flow: true, html: h, temDado: true, after: function () { if (llm && seg < 20) setTimeout(function () { var u = B.$('#usar-motor'); if (u) u.hidden = false; }, (20 - seg) * 1000); } };
+      return { nav: null, flow: true, html: h, temDado: true, after: function () { if (llm) contador(t.montando.desde, '#usar-motor'); } };
     }
     if (t.aplicando && t.aplicando.inicio === inicio) {
       var ds = t.aplicando.dias.map(function (id) { return B.nomeDia(B.somarDias(inicio, C.DIA_IDS.indexOf(id))).toLowerCase(); });
-      h += '<div class="stat" role="status"><span class="ico b">' + ic('refresh') + '</span><div><h2>Aplicando seus pedidos…</h2><p>' + (ds.length ? 'Refaço só ' + juntar(ds) + '.' : 'Refaço os dias que o pedido da semana pede.') + ' Os dias mantidos ficam como estão.</p></div></div>';
-      h += '<div class="dock"><div class="in"><button class="bt big full" disabled>Aplicando…</button></div></div>';
-      return { nav: null, flow: true, html: h, temDado: true };
+      var segA = Math.round((Date.now() - t.aplicando.desde) / 1000);
+      h += '<div class="stat" role="status"><span class="ico b">' + ic('refresh') + '</span><div><h2>Aplicando seus pedidos…</h2><p>' + (ds.length ? 'Refaço só ' + juntar(ds) + '.' : 'Refaço os dias que o pedido da semana pede.') + ' Os dias mantidos ficam como estão.' +
+        (E().config('modo_llm') === 'ligado' ? espera(segA, 'com a IA ligada, costuma levar de 30 s a 2 min') : '') + '</p></div></div>';
+      h += '<div class="dock"><div class="in"><button class="bt big full" disabled>Aplicando…</button>' +
+        '<button class="bt sec big full" style="margin-top:8px" data-acao="cancelar-aplicar" id="cancelar-aplicar"' + (segA < 20 ? ' hidden' : '') + '>Cancelar e usar o motor</button></div></div>';
+      return { nav: null, flow: true, html: h, temDado: true, after: function () { contador(t.aplicando.desde, '#cancelar-aplicar'); } };
     }
     if (!w) return { nav: null, flow: true, temDado: true, html: h + App.ui.empty('cal', 'Nenhuma semana em planejamento.', 'Comece pelo estoque.', '<a class="bt pri big" href="#estoque">Informar o estoque</a>') };
     var tem = (w.sem.dias || []).some(function (d) { return d.jantar && d.jantar.receita_id; });
     if (t.erro) { var er = t.erro; t.erro = null; return { nav: null, flow: true, html: h + App.ui.empty('alert', er, 'Nada foi apagado. Tente de novo.', '<button class="bt pri big" data-acao="ctx-montar" data-inicio="' + inicio + '">Tentar de novo</button>', true) }; }
-    if (!tem) return { nav: null, flow: true, temDado: true, html: h + App.ui.empty('book', 'Sem receitas suficientes para sugerir.', 'Monte a proposta depois do contexto.', '<a class="bt pri big" href="#contexto">Voltar ao contexto</a>', true) };
+    if (!tem) {
+      // D14: recarregar (ou o iPhone fechar o app) no meio da montagem deixa a semana sem jantares; isso não é falta de receita
+      var jantares = (E().livro() || []).filter(function (r) { return r.tipo === 'jantar' && (r.status || 'ativa') === 'ativa'; }).length;
+      if (jantares >= 7) return { nav: null, flow: true, temDado: true, html: h + App.ui.empty('refresh', 'A montagem foi interrompida.', 'Nada foi perdido. Monte de novo.', '<button class="bt pri big" data-acao="ctx-montar" data-inicio="' + inicio + '">Montar de novo</button>', true) };
+      return { nav: null, flow: true, temDado: true, html: h + App.ui.empty('book', 'Sem receitas suficientes para sugerir.', 'Monte a proposta depois do contexto.', '<a class="bt pri big" href="#contexto">Voltar ao contexto</a>', true) };
+    }
 
     var calc = E().calc(inicio), cs = K().checkSum(calc.checklist || []), res = K().resumoPedidos(w.sem), sem = w.sem;
     var usadas = Number(sem.propostas_usadas || 0), outra = Math.min(C.TETO_PROPOSTAS, usadas + 1), podeOutra = usadas < C.TETO_PROPOSTAS - 1;
@@ -7679,7 +7978,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       return '<div class="prep"><div class="grow"><b data-q="panela">' + esc(t.titulo || C.TIPOS_TAREFA[t.tipo].rotulo) + '</b><small data-q="panela">' + esc(String(t.texto || '').replace(/^Preparo do fim de semana: /, '')) + '</small><div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px">' +
         '<select class="when-sel" data-quando="' + esc(t.id) + '" aria-label="Quando: ' + esc(t.titulo || '') + '">' + opts.map(function (x) { return '<option value="' + x[0] + '"' + (x[0] === cur ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select>' +
         (naJanela ? '<span class="injan">' + ic('chk') + 'na janela livre</span>' : '') + '</div></div></div>';
-    }).join('') : '<p class="mut" style="margin:0">Sem cozimento antecipado</p>') + '<p class="foot-note">Datas do motor. Encaixar nas janelas livres ainda não existe no motor.</p></section>';
+    }).join('') : '<p class="mut" style="margin:0">Sem cozimento antecipado</p>') + '<p class="foot-note">Datas sugeridas pelo motor. Mude a data de cada tarefa se precisar.</p></section>';
     h += '<h2 class="t">Conferência <small>ao vivo</small></h2><section class="card">' + K().conferenciaHTML(cl) + '</section>';
     var alertas = cl.filter(function (c) { return c.status === 'alerta' || c.status === 'manual'; });
     if (res.tem) {
@@ -7716,7 +8015,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
 /* app/telas/entregas.js · Entregas (LEIA.md §7, SPEC §5 Entregas; passo 5 de 5). Rota #entregas[/<inicio>].
  * Dado: a semana aprovada (aprovada_em, alertas_aceitos) e calcularSemana do motor (cardápio, lista, tarefas, receitas).
  * Word: src/export-docx.js (CardapioDocx.gerarDocx, gerado no navegador, sem rede). Mensagem: nota editorial da semana
- * ou o rascunho do motor (rascunhoNotaEditorial). Lembretes no calendário: onda 2c.
+ * ou o rascunho do motor (rascunhoNotaEditorial). Lembretes no calendário: ainda não disponível.
  * Sem template literal (crase).
  */
 (function (root) {
@@ -7730,9 +8029,13 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     if (inicio) { var w = E().semana(inicio); if (E().aprovada(w)) return w; }
     return E().semanaDaCompra() || E().semanaDeHoje();
   }
+  // D11 · de quem é o texto da mensagem: a nota que a IA escreveu só vale quando o motor não trocou nenhum dia da proposta dela
+  // (senão ela fala de uma semana que não existe mais); a nota da IA sai com o aviso para conferir. Sem nota, o rascunho do motor.
   function mensagem(w, calc) {
-    if (w.sem.nota_editorial) return w.sem.nota_editorial;
-    try { return root.CardapioMotor.rascunhoNotaEditorial(w.sem, calc.dados, calc.dados.semana_anterior); } catch (e) { return ''; }
+    var sem = w.sem, deIA = sem.modo_proposta === 'llm' && !!sem.nota_editorial && !(sem.llm_recusas || []).length;
+    if (deIA) return { texto: sem.nota_editorial, ia: true };
+    if (sem.nota_editorial && sem.modo_proposta !== 'llm') return { texto: sem.nota_editorial, ia: false };
+    try { return { texto: root.CardapioMotor.rascunhoNotaEditorial(sem, calc.dados, calc.dados.semana_anterior), ia: false }; } catch (e) { return { texto: '', ia: false }; }
   }
 
   App.telas.entregas = function (inicio) {
@@ -7762,10 +8065,11 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     h += dv('#compras', 'cart', 'var(--t-folha)', 'Lista de compras', B.plural(calc.lista.itens.length, 'item', 'itens') + ' em ' + B.plural(Object.keys(lojas).length, 'loja', 'lojas') + ' · ' + Object.keys(lojas).map(function (l) { return (C.LOJAS[l] ? C.LOJAS[l].nome : l) + ' ' + lojas[l]; }).join(' · '));
     h += dv('#semana' + (w.inicio > B.segundaDe(B.hojeIso()) ? '/proxima' : ''), 'pot', 'var(--t-ave)', 'Tarefas de pré-preparo', B.plural(tarefas.length, 'tarefa', 'tarefas') + (prim ? ', a primeira ' + B.NA_DIA[C.DIAS[B.indiceDia(prim.data)].id] + ' ' + B.ddmm(prim.data) + ' ' + (TURNO[prim.quando] || '') : ''));
     h += dv('#livro', 'book', 'var(--t-leg)', 'Receitas da semana', B.plural(nRec, 'receita', 'receitas') + (nNovas ? ', ' + nNovas + ' ' + (nNovas === 1 ? 'nova' : 'novas') + ' para testar' : ''));
-    h += dv(null, 'clock', 'var(--t-peixe)', 'Lembretes no calendário "Cozinha"', 'Lembretes chegam na onda 2c');
+    h += dv(null, 'clock', 'var(--t-peixe)', 'Lembretes no calendário "Cozinha"', 'Ainda não disponível');
+    var msg = mensagem(w, calc);
     h += '<h2 class="t">Para a geladeira e para mandar</h2><section class="card">' + (estadoWord.erro ? '<div class="note w" role="alert">' + ic('alert') + '<span>O Word não foi gerado. O resto está pronto.</span></div>' : '') +
       '<div class="btrow" style="margin-top:' + (estadoWord.erro ? '10px' : '0') + '"><button class="bt sec" data-acao="baixar-word" data-inicio="' + esc(w.inicio) + '">' + ic('doc') + (estadoWord.erro ? 'Tentar' : 'Baixar Word') + '</button><button class="bt sec" data-acao="copiar-texto" data-inicio="' + esc(w.inicio) + '">' + ic('copy') + 'Copiar texto</button></div>' +
-      '<p class="mut small" style="margin:12px 0 6px">Mensagem para a nutricionista (rascunho do motor):</p><div class="msg" id="msg" data-q="mensagem">' + esc(mensagem(w, calc)) + '</div><p class="saved" id="copiado" role="status" hidden></p></section>';
+      '<p class="mut small" style="margin:12px 0 6px">Mensagem para a nutricionista (' + (msg.ia ? 'rascunho da IA: confira antes de enviar' : 'rascunho do motor') + '):</p><div class="msg" id="msg" data-q="mensagem">' + esc(msg.texto) + '</div><p class="saved" id="copiado" role="status" hidden></p></section>';
     h += '<div class="dock"><div class="in"><a class="bt pri big full" href="#semana' + (w.inicio > B.segundaDe(B.hojeIso()) ? '/proxima' : '') + '">Ver a semana</a></div></div>';
     return { nav: null, flow: true, html: h, temDado: true, titulo: 'Entregas' };
   };
@@ -7826,7 +8130,9 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     var L = calc.lista, marcadas = W.sem.compras_marcadas || {};
     var n = {}; L.itens.forEach(function (i) { n[i.loja] = (n[i.loja] || 0) + 1; });
     var lojas = Object.keys(C.LOJAS).filter(function (l) { return n[l]; });
-    var loja = lojas.indexOf(lojaPedida) >= 0 ? lojaPedida : lojas[0];
+    // D18: com "Sem Pedrosa nesta semana" a aba aberta é a primeira loja que não é o Pedrosa (o item do Pedrosa continua na aba dele)
+    var semPedrosa = W.sem.pedido_pedrosa === false, abertura = (semPedrosa && lojas.filter(function (l) { return l !== 'pedrosa'; })[0]) || lojas[0];
+    var loja = lojas.indexOf(lojaPedida) >= 0 ? lojaPedida : abertura;
     var ent = W.sem.entrega_dia ? C.DIAS.filter(function (d) { return d.id === W.sem.entrega_dia; })[0] : null;
     var h = App.ui.topo('Compras', 'semana de ' + B.ddmm(W.inicio) + (ent ? ' · entrega ' + ent.nome.toLowerCase() : ''));
     // BACKLOG 99 (Tobia 26/09): o que mudou depois da aprovação vale para todas as lojas, então fica ACIMA das abas
@@ -8085,8 +8391,8 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
  * Tela NOVA, não desenhada no mockup: mesma linguagem visual de Mais (cartão com linhas de 64 px). O Tobia precisa ver.
  *  - chave "Montar com o <provedor>" = op config_definir modo_llm (ligado/desligado), com a frase do que muda;
  *  - provedor (R42, emenda v2.1): escolha entre LLM.PROVEDORES ∩ LLM.PROVEDORES_DADO_REAL, op config_definir llm_provedor;
- *  - R43 (emenda v2.2): sem GEMINI_PAGO = sim, o Gemini fica desabilitado para montar a semana, com o texto do contrato;
- *    a tela lê Config.gemini_pago (espelho da Script Property, desvio registrado) e padrão 'nao';
+ *  - ADR-026 (R43 revogada na v2.7): o Gemini recebe qualquer tarefa, com ou sem faturamento; a tela só informa
+ *    "nível gratuito" quando Config.gemini_pago (espelho da Script Property) não é 'sim';
  *  - custo do mês: soma de LlmLog.custo_usd do mês × câmbio fixo (App.config.CAMBIO_USD_EUR · sugestão Claude · validar).
  * Sem template literal (crase).
  */
@@ -8113,14 +8419,13 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       (ligado ? 'O ' + esc(nome) + ' propõe a semana; o motor confere o plano da nutricionista antes de você ver.'
               : 'O motor monta a semana. O pedido em texto livre vai ao Gemini, que só traduz; quem escolhe é o motor.') +
       '</small></span><span class="sw" aria-hidden="true"></span></button></section>';
-    // R42 + R43: a semana só vai a IA aprovada para o plano; o Gemini gratuito fica com foto e pedido de ajuste
+    // R42 + ADR-026: as duas IAs aprovadas montam a semana; o Gemini sem faturamento é o nível gratuito (só informação)
     var ps = provedoresPermitidos(), pago = String(E().config('gemini_pago') || 'nao') === 'sim';
     h += '<h2 class="t">Qual IA</h2><section class="card"><h3 class="h" style="font-size:16px;color:var(--mute)">Montar a semana com IA</h3><div class="opt" role="radiogroup" aria-label="IA que monta a semana">' + ps.map(function (p) {
-      var bloq = p === 'gemini' && !pago;
-      return '<button role="radio" aria-checked="' + (p === prov) + '" aria-pressed="' + (p === prov) + '" data-acao="llm-provedor" data-v="' + p + '"' + (bloq ? ' disabled aria-describedby="gemini-nota"' : '') + '>' + esc(NOME[p] || p) + (bloq ? '<small>só com faturamento</small>' : '') + '</button>';
+      var grat = p === 'gemini' && !pago;
+      return '<button role="radio" aria-checked="' + (p === prov) + '" aria-pressed="' + (p === prov) + '" data-acao="llm-provedor" data-v="' + p + '">' + esc(NOME[p] || p) + (grat ? '<small>nível gratuito</small>' : '') + '</button>';
     }).join('') + '</div>' +
-      (!pago ? '<p class="foot-note" id="gemini-nota">Gemini só com faturamento ligado (o nível gratuito pode usar o conteúdo).</p>' : '') +
-      (prov === 'gemini' && !pago ? '<div class="note a">' + ic('alert') + '<span>A semana está marcada para o Gemini, que não recebe o plano sem faturamento: ela é montada pelo motor.</span></div>' : '') +
+      (!pago ? '<p class="foot-note" id="gemini-nota">Gemini no nível gratuito: vale para montar a semana, com limite de chamadas por minuto e por dia.</p>' : '') +
       '<div class="kv"><span class="l">Foto e pedido de ajuste<small>leitura de foto e tradução do texto do pedido</small></span><span class="v">Gemini</span></div>' +
       '<p class="foot-note">Só aparecem as IAs aprovadas para o dado da família. O modelo de cada tarefa fica na planilha.</p></section>';
     var cm = custoDoMes();
@@ -8315,11 +8620,13 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       App.ui.render(true);
       ok($('[data-acao="modo-llm"]').getAttribute('aria-checked') === 'true', 'relido do servidor, a chave continua ligada');
       var gb = $('[data-acao="llm-provedor"][data-v="gemini"]');
-      ok(gb && gb.disabled && /Gemini só com faturamento ligado \(o nível gratuito pode usar o conteúdo\)\./.test(texto('#main')), 'R43: Gemini desabilitado para montar a semana, com o texto do contrato', gb && gb.disabled);
+      ok(gb && !gb.disabled && /nível gratuito/.test(texto(gb)) && !/só com faturamento/.test(texto('#main')), 'ADR-026: Gemini habilitado para montar a semana, com "nível gratuito" só como informação', gb && { disabled: gb.disabled, texto: texto(gb) });
       clicar(gb);
-      return esperar(300).then(function () {
-        ok(App.sync.pendentes() === 0 && configServidor('llm_provedor') === 'claude', 'tocar no Gemini desabilitado não grava nada', configServidor('llm_provedor'));
+      return ate(function () { return App.sync.pendentes() === 0 && configServidor('llm_provedor') === 'gemini'; }, 5000).then(function (v) {
+        ok(v, 'ADR-026: tocar no Gemini grava llm_provedor = gemini', configServidor('llm_provedor'));
         ok(/Foto e pedido de ajuste/.test(texto('#main')), 'Gemini aparece para foto e pedido de ajuste');
+        clicar('[data-acao="llm-provedor"][data-v="claude"]');
+        return ate(function () { return App.sync.pendentes() === 0 && configServidor('llm_provedor') === 'claude'; }, 5000);
       });
     }).then(function () {
       clicar('[data-acao="modo-llm"]');
@@ -8419,6 +8726,12 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       verificarTela('conta');
       return App.autoteste.fase2 ? App.autoteste.fase2({ ok: ok, ir: ir, ate: ate, esperar: esperar, clicar: clicar, texto: texto, $: $, $$: $$, pill: pill, verificarTela: verificarTela, semanaServidor: semanaServidor, configServidor: configServidor }) : null;
     }).then(function () {
+      // TELA-A (onda G1 08/10): casos novos da frente TELA-A, no bloco próprio no fim do arquivo
+      return App.autoteste.faseTelaA ? App.autoteste.faseTelaA({ ok: ok, ir: ir, ate: ate, esperar: esperar, clicar: clicar, texto: texto, $: $, $$: $$, semanaServidor: semanaServidor, configServidor: configServidor }) : null;
+    }).then(function () {
+      // TELA-B (onda G1 08/10): casos novos da frente TELA-B (login com sessão, fila, estoque por texto, hora com fuso, Compras)
+      return App.autoteste.faseTelaB ? App.autoteste.faseTelaB({ ok: ok, ir: ir, ate: ate, esperar: esperar, clicar: clicar, texto: texto, $: $, $$: $$, pill: pill, semanaServidor: semanaServidor, configServidor: configServidor }) : null;
+    }).then(function () {
       // H10: motor recalculando a semana no aparelho
       var w = App.estado.semanaDeHoje(), dados = App.estado.calc(w.inicio).dados, tempos = [];
       for (var i = 0; i < 20; i++) { var a = performance.now(); root.CardapioMotor.calcularSemana(w.sem, dados); tempos.push(performance.now() - a); }
@@ -8439,7 +8752,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   App.autoteste = { pronto: function () { App.autoteste.estaPronto = true; }, rodar: rodar, verificarTela: verificarTela, ok: ok, estaPronto: false, fase2: null };
 })(this);
 
-/* ---------- fase 2: Semana (M1), planejamento completo (M3, M4), modo LLM (R36, R43) e edição em curso (R41) ---------- */
+/* ---------- fase 2: Semana (M1), planejamento completo (M3, M4), modo LLM (R36, ADR-026) e edição em curso (R41) ---------- */
 (function (root) {
   'use strict';
   var App = root.App;
@@ -8596,13 +8909,13 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     }).then(function (v) {
       ok(v, '"Usar o motor agora" monta pelo motor e diz o porquê');
       App.apiFalsa.estado.latencia_llm = 900;
-      // R43: Gemini sem faturamento não recebe o plano
+      // ADR-026: o Gemini sem faturamento também recebe a proposta da semana
       return App.sync.enfileirar('config_definir', { chave: 'llm_provedor', valor: 'gemini' }).then(function () { return ate(fila0, 4000); });
     }).then(function () {
       clicar('[data-acao="outra-proposta"]');
-      return ate(function () { return !App.planejamento.montando && fila0() && $$('.day').length === 7 && /Gemini só com faturamento ligado/.test(texto('#main')); }, 8000);
+      return ate(function () { return !App.planejamento.montando && fila0() && $$('.day').length === 7 && sem(prox).modo_proposta === 'llm'; }, 8000);
     }).then(function (v) {
-      ok(v && /Gemini só com faturamento ligado \(o nível gratuito pode usar o conteúdo\)\. Montei com o motor\./.test(texto('#main')), 'R43: com o Gemini sem faturamento, o servidor recusa (provedor_nao_aprovado), a tela diz o texto do contrato e monta com o motor');
+      ok(v && /proposta do Gemini, conferida pelo motor/.test(texto('#main')) && !/Montei com o motor/.test(texto('#main')), 'ADR-026: com o Gemini sem faturamento, a proposta volta ok e a tela a mostra como proposta do Gemini, conferida pelo motor', { modo: sem(prox).modo_proposta, aviso: App.planejamento.aviso });
       ok(/As 3 propostas da semana foram usadas\./.test(texto('#main')), 'teto de 3 propostas (R39) na tela', sem(prox).propostas_usadas);
       return App.sync.enfileirar('config_definir', { chave: 'llm_provedor', valor: 'claude' }).then(function () { return App.sync.enfileirar('config_definir', { chave: 'modo_llm', valor: 'desligado' }); }).then(function () { return ate(fila0, 4000); });
     }).then(function () {
@@ -8732,6 +9045,372 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
           .then(function () { return App.ui.gravar('semana_patch', { inicio: al, caminho: 'dias.2.eventos', valor: (sa.dias[2].eventos || []).filter(function (e) { return e !== 'livre'; }) }); })
           .then(function () { return App.ui.gravar('semana_patch', { inicio: al, caminho: 'dias.3.eventos', valor: (sa.dias[3].eventos || []).filter(function (e) { return e !== 'livre'; }) }); })
           .then(function () { return ate(fila0, 4000); });
+      });
+    });
+  };
+})(this);
+
+/* ---------- TELA-A (onda G1 08/10) ---------- */
+(function (root) {
+  'use strict';
+  var App = root.App;
+  if (!App.config || !App.config.AUTOTESTE) return;
+  var C = root.CONTRATO, B = App.base, E = function () { return App.estado; };
+  App.autoteste.faseTelaA = function (h) {
+    var ok = h.ok, ir = h.ir, ate = h.ate, esperar = h.esperar, clicar = h.clicar, texto = h.texto, $ = h.$, $$ = h.$$, sem = h.semanaServidor, cfg = h.configServidor;
+    var S = App.apiFalsa.estado, P = App.planejar, T = App.planejamento;
+    var al = P.alvo(), pedidosAntes = B.copia((E().semana(al).sem.pedidos) || {});
+    function fila0() { return App.sync.pendentes() === 0 && App.sync.st.estado !== 'enviando'; }
+    function ids(sm) { return (sm.dias || []).map(function (d) { return d.jantar && d.jantar.receita_id; }).join(','); }
+    function ligarIA() { return App.sync.enfileirar('config_definir', { chave: 'modo_llm', valor: 'ligado' }).then(function () { return ate(fila0, 4000); }); }
+    return Promise.resolve().then(function () {
+      // D10 · a chamada da IA espera a gravação em curso: no instante da chamada llm_*, a fila está sem pendentes
+      var orig = App.apiFalsa.chamar, vistas = [];
+      App.apiFalsa.chamar = function (acao) { if (acao.indexOf('llm_') === 0) vistas.push({ acao: acao, enviando: App.sync.st.enviando, pendentes: App.sync.pendentes() }); return orig.apply(this, arguments); };
+      S.latencia = 1200;
+      return App.sync.enfileirar('config_definir', { chave: 'estoque_rascunho', valor: 'tela-a d10' }).then(function () {
+        App.sync.enviar(); // a gravação sai e fica em curso por mais de 1 s
+        return esperar(300);
+      }).then(function () {
+        return P.proporComLlm(al);
+      }).then(function () {
+        S.latencia = 120; App.apiFalsa.chamar = orig;
+        var v = vistas[0];
+        ok(!!v && v.acao === 'llm_propor_semana' && v.pendentes === 0, 'D10: a chamada da IA só sai depois que o servidor confirmou a gravação em curso (fila sem pendentes)', vistas);
+        return ate(fila0, 5000);
+      });
+    }).then(function () {
+      // D15 · a espera da IA mostra o contador de segundos e a frase do tempo esperado
+      S.latencia_llm = 5000;
+      return ligarIA().then(function () {
+        P.montar(al);
+        return esperar(300);
+      });
+    }).then(function () {
+      T.montando.desde -= 45000; App.ui.render(true);
+      ok(/Esperando há 4[5-9] s/.test(texto('.stat')) && /costuma levar de 30 s a 2 min/.test(texto('.stat')), 'D15: montando com a IA mostra o contador de segundos e "costuma levar de 30 s a 2 min"', texto('.stat'));
+      var antes = texto('#espera-seg');
+      return esperar(1300).then(function () { ok(!!antes && texto('#espera-seg') !== antes, 'D15: o contador anda sozinho a cada segundo', antes + ' → ' + texto('#espera-seg')); });
+    }).then(function () {
+      return ate(function () { return !T.montando && fila0(); }, 9000);
+    }).then(function () {
+      // D2 · motivo pelo código da falha
+      S.latencia_llm = 50;
+      var casos = [['limite', /A resposta do Claude ficou grande demais\. Montei com o motor\./], ['tempo', /O Claude não respondeu\./], ['rede', /O Claude não respondeu\./],
+        ['sem_chave', /Falta a chave do Claude no servidor\./], ['recusa', /O Claude recusou montar esta semana\./], ['esquema', /A resposta do Claude veio fora do formato esperado\./], ['desligado', /Montar com o Claude está desligado/]];
+      var difs = [];
+      return casos.reduce(function (p, c) {
+        return p.then(function () {
+          S.llm_falha = c[0] === 'desligado' ? null : c[0];
+          if (c[0] === 'desligado') return App.sync.enfileirar('config_definir', { chave: 'modo_llm', valor: 'desligado' }).then(function () { return ate(fila0, 4000); }).then(function () { return P.proporComLlm(al); }).then(function (r) { if (!c[1].test(r.aviso || '') || r.origem !== 'motor') difs.push(c[0] + ': ' + r.aviso); return ligarIA(); });
+          return P.proporComLlm(al).then(function (r) { if (!c[1].test(r.aviso || '') || r.origem !== 'motor') difs.push(c[0] + ': ' + r.aviso); });
+        });
+      }, Promise.resolve()).then(function () {
+        S.llm_falha = null;
+        ok(!difs.length, 'D2: a falha da IA diz o motivo pelo código (limite, tempo, rede, sem_chave, recusa, esquema, desligado)', difs.join(' | '));
+      });
+    }).then(function () {
+      // D2 · "Outra proposta" com a IA falhando: não gasta uma das 3, o motor entra com a semente da proposta e a tela explica
+      var usadas0 = Number((sem(al) || {}).propostas_usadas || 0);
+      S.llm_falha = 'limite';
+      var esperada = ids(P.montarPeloMotor(al, al + '#' + (usadas0 + 1)));
+      P.outraProposta(al);
+      return ate(function () { return !T.montando && fila0() && /ficou grande demais/.test(texto('#main')); }, 8000).then(function (v) {
+        var s = sem(al);
+        ok(v && /A resposta do Claude ficou grande demais\. Montei com o motor\./.test(texto('#main')), 'D2: a tela diz que a resposta da IA ficou grande demais e que montou com o motor', texto('#main').slice(0, 160));
+        ok(Number(s.propostas_usadas || 0) === usadas0, 'D2: a IA falhou e o motor entrou no lugar: a proposta NÃO é gasta', { antes: usadas0, depois: s.propostas_usadas });
+        var travados = s.dias_travados || {};
+        var difDias = s.dias.map(function (d, i) { return travados[d.dia_id] ? null : ((d.jantar && d.jantar.receita_id) || '') === esperada.split(',')[i] ? null : d.dia_id; }).filter(Boolean);
+        ok(!difDias.length && s.modo_proposta === 'motor', 'D2: a semana que entra é a do motor para os dados atuais, com a semente da proposta (não a mesma de antes)', difDias);
+        S.llm_falha = null;
+      });
+    }).then(function () {
+      // D14 · semana sem jantares fora de uma montagem (recarregou no meio): "foi interrompida", não "sem receitas"
+      var fake = { inicio: al, estado: 'pre_cardapio', versao: 1, sem: P.esqueleto(al) }, orig = E().semana;
+      E().semana = function (i) { return i === al ? fake : orig.apply(E(), arguments); };
+      var r; try { T.montando = null; r = App.telas.precardapio(''); } finally { E().semana = orig; }
+      var t = (function () { var d = root.document.createElement('div'); d.innerHTML = r.html; return d.textContent.replace(/\s+/g, ' '); })();
+      ok(/A montagem foi interrompida/.test(t) && /Montar de novo/.test(t) && !/Sem receitas suficientes/.test(t), 'D14: semana sem jantares depois de recarregar mostra "A montagem foi interrompida" e "Montar de novo"', t.slice(0, 160));
+    }).then(function () {
+      // D3 · "Pedir ajuste" com a IA ligada: contador e "Cancelar e usar o motor"; a resposta tardia é ignorada
+      var modoAntes;
+      S.latencia_llm = 4000;
+      return App.ui.gravar('semana_patch', { inicio: al, caminho: 'pedidos', valor: { ter: { atalhos: ['peixe'], texto: '', em: B.agoraIso(), por: 'tobia' } } }).then(function () { return ate(fila0, 4000); }).then(function () {
+        modoAntes = sem(al).modo_proposta;
+        P.aplicar(al, '#precardapio/resultado');
+        return esperar(400);
+      }).then(function () {
+        ok(/Aplicando seus pedidos/.test(texto('.stat')) && /Esperando há \d+ s/.test(texto('.stat')), 'D3: aplicar pedidos com a IA ligada mostra o contador de espera', texto('.stat'));
+        T.aplicando.desde -= 21000; App.ui.render(true);
+        var b = $('#cancelar-aplicar');
+        ok(!!b && !b.hidden && /Cancelar e usar o motor/.test(texto(b)), 'D3: aos 20 s aparece "Cancelar e usar o motor"', b && texto(b));
+        clicar(b);
+        return ate(function () { return !T.aplicando && fila0() && root.location.hash === '#precardapio/resultado'; }, 6000);
+      }).then(function (v) {
+        ok(v && /sem esperar a IA/.test(texto('#main')) && sem(al).modo_proposta === modoAntes, 'D3: o cancelamento aplica os pedidos pelo motor e diz que não esperou a IA', { aviso: T.aviso, modo: sem(al).modo_proposta });
+        return esperar(4300); // a resposta tardia da IA chega agora
+      }).then(function () {
+        ok(!T.aplicando && sem(al).modo_proposta === modoAntes && ids(sem(al)) === ids(E().semana(al).sem), 'D3: a resposta tardia da IA é ignorada (a semana continua a do motor)', { modo: sem(al).modo_proposta, antes: modoAntes });
+      });
+    }).then(function () {
+      // D6 · o Pedrosa nasce "Não" sem semana anterior; herda da anterior só com o prazo em dia; o padrão chega à aprovação (checklist sem falha)
+      var orig = E().semana, A = function (v) { return { inicio: 'anterior', estado: 'em_curso', sem: { pedido_pedrosa: v } }; };
+      function com(mapa, fn) { E().semana = function (i) { return Object.prototype.hasOwnProperty.call(mapa, i) ? mapa[i] : orig.apply(E(), arguments); }; try { return fn(); } finally { E().semana = orig; } }
+      var r = {};
+      r.semAnterior = com({ '2026-11-23': null }, function () { return P.esqueleto('2026-11-30').pedido_pedrosa; });
+      r.anteriorNao = com({ '2026-10-19': A(false) }, function () { return P.esqueleto('2026-10-26').pedido_pedrosa; });
+      r.anteriorSimNoPrazo = com({ '2026-10-19': A(true) }, function () { return P.esqueleto('2026-10-26').pedido_pedrosa; });
+      r.anteriorSimPrazoPassou = com({ '2026-10-05': A(true) }, function () { return P.esqueleto('2026-10-12').pedido_pedrosa; });
+      ok(r.semAnterior === false && r.anteriorNao === false && r.anteriorSimNoPrazo === true && r.anteriorSimPrazoPassou === false,
+        'D6: o Pedrosa nasce "Não" sem semana anterior ou se ela não pediu; herda o "Sim" só se o prazo (entrega menos 3 dias) ainda não passou', r);
+      var st = null;
+      try {
+        com({ '2026-10-05': A(true) }, function () { var sm = P.esqueleto('2026-10-12'), c = E().calc('2026-10-12', sm); st = (c.checklist || []).filter(function (x) { return x.id === 'pedrosa_antecedencia'; })[0]; });
+      } catch (e) { st = { status: 'erro: ' + e.message }; }
+      ok(!!st && st.status !== 'falha' && st.status !== undefined && String(st.status).indexOf('erro') !== 0, 'D6: semana criada depois da quarta com os padrões não gera a falha do Pedrosa que bloqueia a aprovação', st && { status: st.status, detalhe: st.detalhe });
+    }).then(function () {
+      // D11 · o rótulo da mensagem à nutricionista diz de quem é o texto: IA (com "confira antes de enviar") ou motor
+      var pa = E().semanas().filter(function (w) { return E().aprovada(w); })[0], orig = E().semana, tx = {};
+      function render(mod) {
+        var clone = { inicio: pa.inicio, estado: pa.estado, versao: pa.versao, sem: B.copia(pa.sem) };
+        Object.keys(mod).forEach(function (k) { clone.sem[k] = mod[k]; });
+        E().semana = function (i) { return i === pa.inicio ? clone : orig.apply(E(), arguments); };
+        try {
+          var d = root.document.createElement('div'); d.innerHTML = App.telas.entregas(pa.inicio).html;
+          return { rotulo: (d.querySelector('p.mut.small[style*="12px 0 6px"]') || {}).textContent || '', msg: (d.querySelector('#msg') || {}).textContent || '' };
+        } finally { E().semana = orig; }
+      }
+      tx.ia = render({ modo_proposta: 'llm', nota_editorial: 'Nota escrita pela IA para o teste.', llm_recusas: [] });
+      tx.iaTrocada = render({ modo_proposta: 'llm', nota_editorial: 'Nota escrita pela IA para o teste.', llm_recusas: [{ dia_id: 'ter', sugerida: 'x', motivo: 'y', ficou: 'z' }] });
+      tx.motor = render({ modo_proposta: 'motor', nota_editorial: null, llm_recusas: [] });
+      ok(/rascunho da IA: confira antes de enviar/.test(tx.ia.rotulo) && !/rascunho do motor/.test(tx.ia.rotulo) && /Nota escrita pela IA/.test(tx.ia.msg),
+        'D11: o texto da IA vai com o rótulo "rascunho da IA: confira antes de enviar", não "rascunho do motor"', tx.ia);
+      ok(/rascunho do motor/.test(tx.iaTrocada.rotulo) && !/Nota escrita pela IA/.test(tx.iaTrocada.msg) && /rascunho do motor/.test(tx.motor.rotulo) && tx.motor.msg.length > 20,
+        'D11: se o motor trocou algum dia da IA, a mensagem é o rascunho do motor, com o rótulo do motor', { iaTrocada: tx.iaTrocada.rotulo, motor: tx.motor.rotulo });
+    }).then(function () {
+      // D12 · segunda à noite o planejamento abre a PRÓXIMA semana, não a que já começou; a semana criada por pedido da pessoa continua valendo
+      var hojeO = B.hojeIso, planO = E().semanaEmPlanejamento, r = {};
+      B.hojeIso = function () { return '2026-11-02'; }; // segunda
+      E().semanaEmPlanejamento = function () { return null; };
+      try {
+        r.segunda = P.alvo();
+        B.hojeIso = function () { return '2026-11-04'; }; // quarta
+        r.quarta = P.alvo();
+        E().semanaEmPlanejamento = function () { return { inicio: '2026-11-02', estado: 'estoque' }; }; // a pessoa pediu a desta semana
+        r.pedida = P.alvo();
+      } finally { B.hojeIso = hojeO; E().semanaEmPlanejamento = planO; }
+      ok(r.segunda === '2026-11-09' && r.quarta === '2026-11-09' && r.pedida === '2026-11-02', 'D12: na segunda e na quarta o planejamento abre a próxima semana (09/11); a semana desta segunda só se a pessoa a criou', r);
+    }).then(function () {
+      // D16 · nenhum jargão interno de projeto ("onda 2c", "não existe no motor") nas telas Entregas e Revisar
+      var d = root.document.createElement('div'), pa = E().semanas().filter(function (w) { return E().aprovada(w); })[0];
+      d.innerHTML = App.telas.entregas(pa.inicio).html + App.telas.revisar().html;
+      var t = d.textContent.replace(/\s+/g, ' ');
+      ok(/Lembretes no calendário/.test(t) && /Cozimentos adiantados/.test(t) && !/onda \d|não existe no motor|ainda não existe/i.test(t), 'D16: Entregas e Revisar sem jargão interno ("onda 2c", "ainda não existe no motor")', (/onda \d|existe no motor/i.exec(t) || [''])[0] + ' | ' + /Lembretes no calendário[^.]*/.exec(t));
+    }).then(function () {
+      // volta o estado de antes do bloco (IA desligada, pedidos como estavam)
+      S.llm_falha = null; S.latencia_llm = 900; S.latencia = 120;
+      return App.ui.gravar('semana_patch', { inicio: al, caminho: 'pedidos', valor: pedidosAntes }).then(function () {
+        return App.sync.enfileirar('config_definir', { chave: 'modo_llm', valor: 'desligado' });
+      }).then(function () { return ate(fila0, 4000); });
+    });
+  };
+})(this);
+
+/* ---------- TELA-B (onda G1 08/10) ---------- */
+/* Login com sessão própria (D7), repetição do envio (D8), recusa por código (D13), estoque por texto (D4, D5),
+ * hora com fuso (D17) e Compras sem Pedrosa (D18). Cada caso é isolado: se quebrar, vira FALHOU e o resto segue. */
+(function (root) {
+  'use strict';
+  var App = root.App;
+  if (!App.config || !App.config.AUTOTESTE) return;
+  var C = root.CONTRATO, B = App.base;
+  App.autoteste.faseTelaB = function (h) {
+    var ok = h.ok, ir = h.ir, ate = h.ate, esperar = h.esperar, clicar = h.clicar, texto = h.texto, $ = h.$, $$ = h.$$, pill = h.pill;
+    var S = App.apiFalsa.estado, E = function () { return App.estado; };
+    function fila0() { return App.sync.pendentes() === 0 && App.sync.st.estado !== 'enviando'; }
+    function caso(nome, fn) {
+      return Promise.resolve().then(fn).catch(function (e) { ok(false, nome + ': o caso quebrou', String(e && (e.stack || e.message) || e).slice(0, 240)); });
+    }
+    function aplicares() { return S.chamadas.filter(function (c) { return c.acao === 'aplicar'; }); }
+    function gravarLogin() { var L = App.login.L; return App.idb.gravar('kv', 'login', { token: L.token, email: L.email, pessoa: L.pessoa, exp: L.exp, sessao: L.sessao, sessao_exp: L.sessao_exp }); }
+    function entrarDeNovo() {
+      S.sessao_vencida = false;
+      return ir('#entrar').then(function () { clicar('[data-acao="entrar-falso"]'); return ate(function () { return App.login.estado() === 'dentro' && fila0(); }, 8000); });
+    }
+    var T = 'TELA-B ';
+
+    return caso('D7 sessão guardada', function () {
+      var L = App.login.L;
+      ok(!!L.sessao && L.sessao_exp > Date.now() + 29 * 86400000, T + 'D7: o login pelo Google devolve a sessão de 30 dias e o aparelho a guarda', { sessao: !!L.sessao, exp: L.sessao_exp });
+      // o ID token do Google vence (1 h); a sessão segue valendo: a gravação sobe e a pílula não mente
+      L.exp = 0;
+      var n0 = aplicares().length;
+      return App.sync.enfileirar('config_definir', { chave: 'estoque_rascunho', valor: '' }).then(function () {
+        return ate(function () { return aplicares().length > n0 && fila0(); }, 5000);
+      }).then(function (v) {
+        var ult = aplicares().pop();
+        ok(v && ult && ult.cred === 'sessao', T + 'D7: com o ID token vencido, a gravação sobe pela sessão (corpo traz sessao, não idToken)', { subiu: v, cred: ult && ult.cred });
+        return gravarLogin();
+      });
+    }).then(function () {
+      return caso('D7 recarregar', function () {
+        // recarregar = ler o login do disco: sessão válida entra direto, sem One Tap e sem a tela Entrar
+        return App.login.iniciar().then(function (est) {
+          ok(est === 'dentro' && App.login.estado() === 'dentro', T + 'D7: recarregar com sessão válida (ID token vencido) entra direto', est);
+          return ir('#hoje');
+        }).then(function () {
+          ok(!/Entrar com Google/.test(texto('#main')) && !!$('.agora'), T + 'D7: ... e abre o Hoje, sem tela Entrar', texto('#main').slice(0, 60));
+          App.login.L.exp = Date.now() + 3600000; // devolve o token do Google ao estado de antes do caso
+        });
+      });
+    }).then(function () {
+      return caso('D7 sessão vencida', function () {
+        // o servidor recusa a sessão (vencida ou revogada) com 2 alterações na fila → Entrar COM o aviso da fila
+        return ir('#hoje').then(function () {
+          S.sessao_vencida = true;
+          App.login.L.exp = 0; // o ID token também já venceu; a única credencial é a sessão
+          return App.sync.enfileirar('config_definir', { chave: 'estoque_rascunho', valor: '' });
+        }).then(function () {
+          return App.sync.enfileirar('config_definir', { chave: 'estoque_rascunho', valor: '' });
+        }).then(function () {
+          return ate(function () { return App.login.estado() !== 'dentro' && /esperando/.test(texto('#main')); }, 6000);
+        }).then(function (v) {
+          var t = texto('#main');
+          ok(v && /2 alterações esperando: entre de novo para enviar/.test(t), T + 'D7: sessão recusada com fila → tela Entrar com "2 alterações esperando: entre de novo para enviar"', t.slice(0, 160));
+          ok(!App.login.L.sessao, T + 'D7: a sessão recusada é apagada do aparelho', App.login.L.sessao);
+          var pl = App.ui.syncPill();
+          ok(App.sync.pendentes() === 2 && !/Sincronizado/.test(pl) && /2 na fila · entre de novo/.test(pl), T + 'D7: com fila pendente e sem login a pílula não diz "Sincronizado" (diz "2 na fila · entre de novo")', pl.replace(/<[^>]+>/g, ''));
+          return entrarDeNovo();
+        }).then(function (v) {
+          ok(v && /^Sincronizado/.test(pill()), T + 'D7: entrando de novo a fila sobe e a pílula volta a "Sincronizado"', pill() + ' · fila ' + App.sync.pendentes());
+        });
+      });
+    }).then(function () {
+      return caso('D7 vencimento local', function () {
+        // a credencial vence com o app aberto, sem resposta de erro: a fila espera e o aparelho avisa
+        return ir('#hoje').then(function () {
+          App.login.L.exp = 0; App.login.L.sessao_exp = 1;
+          return App.sync.enfileirar('config_definir', { chave: 'estoque_rascunho', valor: '' });
+        }).then(function () {
+          return ate(function () { return /1 alteração esperando: entre de novo para enviar/.test(texto('#main')); }, 4000);
+        }).then(function (v) {
+          var pl = App.ui.syncPill();
+          ok(v && !/Sincronizado/.test(pl), T + 'D7: credencial vencida com o app aberto e 1 alteração na fila → Entrar com o aviso, sem "Sincronizado"', texto('#main').slice(0, 120) + ' | ' + pl.replace(/<[^>]+>/g, ''));
+          return entrarDeNovo();
+        });
+      });
+    }).then(function () {
+      return caso('D8 repetição', function () {
+        // erro do servidor que não é de rede: pausa crescente (2 s, 4 s…), nunca laço apertado
+        S.falha_aplicar = 'interno';
+        var n0 = aplicares().length;
+        return ir('#hoje').then(function () { return App.sync.enfileirar('config_definir', { chave: 'estoque_rascunho', valor: '' }); }).then(function () { return esperar(5000); }).then(function () {
+          var n = aplicares().length - n0;
+          ok(n >= 1 && n <= 3, T + 'D8: erro "interno" do servidor repete com pausa crescente (' + n + ' envios em 5 s; antes eram dezenas)', n);
+          // erro definitivo: 1 tentativa, para, e a tela diz o porquê
+          S.falha_aplicar = 'entrada_invalida';
+          var m0 = aplicares().length;
+          App.sync.agendarEnvio(0);
+          return esperar(3500).then(function () { return aplicares().length - m0; });
+        }).then(function (m) {
+          ok(m === 1, T + 'D8: erro definitivo (entrada_invalida) não repete: ' + m + ' envio', m);
+          ok(App.sync.st.estado === 'falhou' && /^Não sincronizou/.test(pill()) && /Não sincronizou: a planilha não aceitou a alteração/.test(texto('#faixa-sync')),
+            T + 'D8: a pílula diz "Não sincronizou" e a faixa explica, com "Tentar de novo"', pill() + ' | ' + texto('#faixa-sync'));
+          S.falha_aplicar = null;
+          var bt = $('#faixa-sync [data-acao="sync-tentar"]');
+          if (bt) clicar(bt); else App.sync.agendarEnvio(0);
+          return ate(function () { return fila0() && /^Sincronizado/.test(pill()); }, 6000);
+        }).then(function (v) {
+          ok(v && !!App.sync.st && App.sync.st.estado === 'ok', T + 'D8: "Tentar de novo" (falha resolvida) esvazia a fila e a pílula volta a "Sincronizado"', pill());
+          S.falha_aplicar = null;
+        });
+      });
+    }).then(function () {
+      return caso('D13 recusa por código', function () {
+        // a planilha recusa por motivo que NÃO é conflito: o texto não pode dizer "outro celular"
+        return ir('#hoje').then(function () {
+          return App.sync.enfileirar('semana_patch', { inicio: '2099-01-05', caminho: 'tarefas_feitas.autoteste', valor: true });
+        }).then(function () {
+          return ate(function () { return App.sync.st.estado === 'conflito'; }, 6000);
+        }).then(function (v) {
+          var t = texto('#faixa-sync');
+          ok(v && /não está na planilha/.test(t) && !/outro celular/.test(t), T + 'D13: recusa por entrada_invalida diz o motivo real, sem "outro celular"', t);
+          ok(!/Usar a do outro celular/.test(t) && /Entendi/.test(t), T + 'D13: sem conflito de verdade, o botão é "Entendi" (não "Usar a do outro celular")', t);
+          clicar('[data-acao="aceitar-conflito"]');
+          return ate(function () { return !$('#faixa-sync'); }, 3000);
+        });
+      });
+    }).then(function () {
+      return caso('D17 hora com fuso', function () {
+        var iso = B.agoraIso();
+        ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([+-]\d{2}:\d{2}|Z)$/.test(iso), T + 'D17: a hora que o aparelho grava leva o fuso (' + iso + ')', iso);
+        // 00:10 em Paris (+02:00) de 09/10 = 22:10Z de 08/10, ANTES de 22:30Z de 08/10: comparado como texto daria o contrário
+        var sem = { pedidos_aplicados_em: '2026-10-08T22:30:00Z' }, p = { texto: 'peixe', em: '2026-10-09T00:10:00+02:00' };
+        ok(App.comp.pendente(sem, p) === false, T + 'D17: pedido de 00:10+02:00 é anterior à aplicação de 22:30Z (compara por Date, não por texto)', App.comp.pendente(sem, p));
+        p.em = '2026-10-09T00:50:00+02:00'; // 22:50Z: depois
+        ok(App.comp.pendente(sem, p) === true, T + 'D17: ... e o de 00:50+02:00 é posterior', App.comp.pendente(sem, p));
+      });
+    }).then(function () {
+      return caso('D18 Compras sem Pedrosa', function () {
+        var W = E().semanaDaCompra();
+        if (!W) { ok(false, T + 'D18: há semana de compra', null); return; }
+        var itens = E().calc(W.inicio).lista.itens, lojas = {}; itens.forEach(function (i) { lojas[i.loja] = (lojas[i.loja] || 0) + 1; });
+        var temOutra = Object.keys(lojas).some(function (l) { return l !== 'pedrosa'; });
+        ok(lojas.pedrosa > 0 && temOutra, T + 'D18: a lista da semana tem itens do Pedrosa e de outra loja (premissa do caso)', lojas);
+        var antes = W.sem.pedido_pedrosa;
+        return App.ui.gravar('semana_patch', { inicio: W.inicio, caminho: 'pedido_pedrosa', valor: false }).then(function () { return ate(fila0, 4000); }).then(function () {
+          return ir('#compras');
+        }).then(function () {
+          var cur = $('nav.stores a[aria-current="page"]');
+          ok(!!cur && !/Pedrosa/.test(texto(cur)), T + 'D18: com "Sem Pedrosa nesta semana" Compras abre na primeira loja que não é o Pedrosa', cur && texto(cur));
+          return App.ui.gravar('semana_patch', { inicio: W.inicio, caminho: 'pedido_pedrosa', valor: antes === undefined ? true : antes });
+        }).then(function () { return ate(fila0, 4000); });
+      });
+    }).then(function () {
+      return caso('D5 estoque por texto', function () {
+        var TXT = 'meio pacote de lentilha vermelha, abóbora grande na geladeira, 1 frango no congelador, 3 cenouras, 500g de carne moída, 2 kg de batata e espinafre';
+        return ir('#estoque').then(function () {
+          App.estoqueLeitura.itens = []; App.estoqueLeitura.estado = null;
+          clicar('[data-acao="estoque-texto"]');
+          return esperar(150);
+        }).then(function () {
+          $('#txtin').value = TXT;
+          clicar('[data-acao="estoque-ler-texto"]');
+          return ate(function () { return $('[data-acao="estoque-confirmar"]') || $('.empty'); }, 4000);
+        }).then(function () {
+          var its = App.estoqueLeitura.itens, por = {}; its.forEach(function (i) { por[i.ingrediente_id] = i; });
+          function e(id, q, un, loc) { var i = por[id]; return !!i && i.quantidade === q && i.unidade === un && (loc === undefined || i.local === loc); }
+          var res = {
+            lentilha: e('lentilha_vermelha', 0.5, 'emb', 'despensa'), abobora: e('abobora', 1, 'un', 'geladeira'), frango: e('peito_frango', 1, 'un', 'congelador'),
+            cenoura: e('cenoura', 3, 'un', 'geladeira'), carne: e('carne_moida_5', 500, 'g', 'geladeira'), batata: e('batata', 2000, 'g', 'despensa'), espinafre: e('espinafre_fresco', 1, 'un', 'geladeira')
+          };
+          var certos = Object.keys(res).filter(function (k) { return res[k]; }).length;
+          ok(its.length === 7 && certos === 7, T + 'D5: o exemplo do próprio app (7 itens) sai 7/7 com quantidade e local certos', { itens: its.length, certos: res, lido: its.map(function (i) { return i.ingrediente_id + ' ' + i.quantidade + i.unidade + ' ' + i.local; }).join(' | ') });
+          ok(/7 itens/.test(texto('.dock .sum')), T + 'D5: a tela mostra "7 itens"', texto('.dock .sum'));
+          clicar('[data-acao="estoque-descartar"]');
+          return esperar(100);
+        });
+      });
+    }).then(function () {
+      return caso('D4 erro do estoque', function () {
+        var L = App.estoqueLeitura;
+        $('#txtin').value = 'zzz qqq xxx';
+        clicar('[data-acao="estoque-ler-texto"]');
+        return ate(function () { return L.estado === 'erro'; }, 3000).then(function () {
+          ok(/texto/.test(texto('.empty h2')) && !/foto/.test(texto('.empty h2')), T + 'D4: erro numa leitura de texto fala de "texto", não de "foto"', texto('.empty h2'));
+          clicar('[data-acao="estoque-texto"]'); // "Digitar"
+          return esperar(200);
+        }).then(function () {
+          ok(L.estado !== 'erro' && !!$('#txtin'), T + 'D4: "Digitar" sai do erro e mostra a caixa de texto', { estado: L.estado, caixa: !!$('#txtin') });
+          // o erro de foto continua falando de foto
+          L.fonte = 'foto'; L.estado = 'erro'; App.ui.render(true);
+          ok(/foto/.test(texto('.empty h2')), T + 'D4: erro numa leitura de foto fala de "foto"', texto('.empty h2'));
+          // o erro não persiste ao navegar
+          return ir('#hoje');
+        }).then(function () { return ir('#estoque'); }).then(function () {
+          ok(L.estado !== 'erro' && !/Não consegui ler/.test(texto('#main')), T + 'D4: depois de navegar para outra tela e voltar, o erro não está mais lá', { estado: L.estado });
+          L.estado = null; L.texto = false; L.itens = [];
+        });
       });
     });
   };
