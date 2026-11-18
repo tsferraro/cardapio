@@ -687,7 +687,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
 (function (root) {
   'use strict';
 
-  var VERSAO = 'contrato-v2.7';
+  var VERSAO = 'contrato-v2.8';
   var FORMAS_LEGUMINOSA = ['seca', 'congelada', 'conserva'];
   var STORAGE_KEY = 'cardapio_v1';
 
@@ -908,7 +908,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   var OPS = {
     semana_criar:          { alvo: 'Semanas', dados: '{ inicio, semana }  // só se não existe; senão conflito e o aparelho adota a da planilha' },
     semana_patch:          { alvo: 'Semanas', dados: '{ inicio, caminho: "dias.2.jantar.receita_id", valor, base_versao }' },
-    semana_estado:         { alvo: 'Semanas', dados: '{ inicio, de, para, alertas_aceitos?, estoque_copia?, lista_aprovada? }  // R39, R40, R41b (lista vai para a coluna lista_aprovada_json)' },
+    semana_estado:         { alvo: 'Semanas', dados: '{ inicio, de, para, alertas_aceitos?, falhas_aceitos?, estoque_copia?, lista_aprovada? }  // R39 (falha do checklist avisa, não bloqueia: ADR-028), R40, R41b (lista vai para a coluna lista_aprovada_json)' },
     estoque_upsert:        { alvo: 'Estoque', dados: '{ item: EstoqueVivo }' },
     estoque_remover:       { alvo: 'Estoque', dados: '{ id }' },
     estoque_confirmar:     { alvo: 'Config',  dados: '{ em, fonte, nada_novo: b }' },
@@ -995,7 +995,8 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       receitas_novas: 'a',  // [ReceitaV2] propostas pelo LLM, ainda fora do Livro (R37)
       janelas_livres: 'a',  // [JanelaLivre]
       tarefas_quando: 'o',  // { tarefa_id: { data, turno } }
-      alertas_aceitos: 'a', aprovada_em: 's?', aprovada_por: 's?',
+      alertas_aceitos: 'a', falhas_aceitos: 'a', // v2.8 (ADR-028): ids das falhas do checklist que a pessoa aprovou sabendo
+      aprovada_em: 's?', aprovada_por: 's?',
       pedidos_aplicados_em: 's?', // v2.5 (A3): quando os pedidos foram aplicados; outra proposta zera
       lista_aprovada: 'o?', // R41: cópia da ListaCompras gravada na aprovação; base de 'compra extra' e 'sobra da compra'
       fechamento: 'o?'      // 2c
@@ -4602,7 +4603,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     if (typeof p.nota_editorial === 'string' && p.nota_editorial) s.nota_editorial = U.semTravessao(p.nota_editorial);
     var dadosF = comReceitasNovas(dados, novas);
     s = S.derivarDias(s, dadosF);
-    // a semana inteira passa pelo checklist como qualquer proposta do motor (falha bloqueia a aprovação, R39)
+    // a semana inteira passa pelo checklist como qualquer proposta do motor (falha vira aviso registrado na aprovação, R36 e R39, ADR-028)
     var falhas = CH.avaliarChecklist(s, dadosF).filter(function (it) { return it.status === 'falha'; })
       .map(function (it) { return { id: it.id, texto: it.texto, detalhe: it.detalhe || null }; });
     return {
@@ -5296,11 +5297,13 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
           if (ctx.servidor && usadas >= C.TETO_PROPOSTAS) return erro(op, 'transicao_invalida', 'as ' + C.TETO_PROPOSTAS + ' propostas já foram usadas');
           s2.propostas_usadas = usadas + 1;
         }
+        if (ctx.servidor && d.para === 'aprovada' && d.falhas_aceitos !== undefined && !Array.isArray(d.falhas_aceitos)) return erro(op, 'entrada_invalida', 'falhas_aceitos deve ser lista'); // v2.8 (ADR-028)
         r.estado = d.para; s2.estado = d.para;
         if (d.para === 'aprovada') {
           r.aprovada_em = em; r.aprovada_por = por;
           s2.aprovada_em = em; s2.aprovada_por = por;
           s2.alertas_aceitos = d.alertas_aceitos || [];
+          s2.falhas_aceitos = d.falhas_aceitos || [];
           if (d.estoque_copia) s2.estoque = d.estoque_copia; // R40
           if (d.lista_aprovada) r.lista_aprovada_json = JSON.stringify(d.lista_aprovada); // R41b + R44: coluna própria, fora do json da semana
         }
@@ -5423,6 +5426,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
         ex.aprovada_em = B().somarDias(ex.inicio, -3) + 'T20:31:00';
         ex.aprovada_por = 'geovana';
         ex.alertas_aceitos = ex.alertas_aceitos || [];
+        ex.falhas_aceitos = ex.falhas_aceitos || [];
         // R41b: a semana aprovada guarda a lista que o motor gerou na aprovação (base da compra extra e da sobra)
         try {
           if (root.CardapioMotor && M.regras) ex.lista_aprovada = root.CardapioMotor.calcularSemana(ex, { regras: M.regras, ingredientes: M.ingredientes, receitas: M.receitas, lanches: M.lanches }).lista;
@@ -6536,7 +6540,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
 
   var EVENTOS_PADRAO = { ter: ['natacao_julia', 'treino_almoco_g'] }; // padrão do CONTRATO §2 (eventos_dia), o mesmo do motor
 
-  // D6 · o Pedrosa começa como "Sim" só se a semana anterior pediu E o prazo ainda não passou. O checklist reprova ("falha") o pedido
+  // D6 · o Pedrosa começa como "Sim" só se a semana anterior pediu E o prazo ainda não passou. O checklist reprova ("falha", que só avisa na aprovação, ADR-028) o pedido
   // de uma semana criada depois de entrega − 3 dias; criar toda semana com "Sim" travava a aprovação em todo planejamento feito
   // depois da quarta (o planejamento normal é no fim de semana). Sem semana anterior: "Não". A pessoa muda no Contexto.
   var OFF_ENTREGA = { sex: -3, sab: -2, dom: -1 }; // a entrega é no fim de semana ANTES da semana (R13), igual a telas/contexto.js
@@ -6557,7 +6561,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       entrega_dia: 'sab', pedido_pedrosa: pedrosaInicial(inicio, 'sab'), menu_escola: [], dias: dias, estoque: [], estoque_atualizado_em: null,
       compras_marcadas: {}, tarefas_feitas: {}, nota_editorial: null, origem_plano: 'sugestao',
       estado: 'estoque', propostas_usadas: 0, modo_proposta: 'motor', dias_travados: {}, pedidos: {}, restricoes: {},
-      pedido_resultado: [], llm_recusas: [], receitas_novas: [], janelas_livres: [], tarefas_quando: {}, alertas_aceitos: [],
+      pedido_resultado: [], llm_recusas: [], receitas_novas: [], janelas_livres: [], tarefas_quando: {}, alertas_aceitos: [], falhas_aceitos: [],
       aprovada_em: null, aprovada_por: null
     };
   }
@@ -6625,7 +6629,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     return manterCamposV2(sem, nova, 'motor');
   }
   function manterCamposV2(sem, nova, modo) {
-    ['estado', 'propostas_usadas', 'dias_travados', 'pedidos', 'janelas_livres', 'tarefas_quando', 'alertas_aceitos', 'menu_escola', 'criada_em', 'id']
+    ['estado', 'propostas_usadas', 'dias_travados', 'pedidos', 'janelas_livres', 'tarefas_quando', 'alertas_aceitos', 'falhas_aceitos', 'menu_escola', 'criada_em', 'id']
       .forEach(function (k) { if (sem[k] !== undefined) nova[k] = B().copia(sem[k]); });
     nova.modo_proposta = modo;
     nova.pedido_resultado = nova.pedido_resultado || [];
@@ -6836,10 +6840,11 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     a.cancelado = true;
     return aplicar(a.inicio, a.volta, a.soDias, { semLlm: true });
   }
-  // Aprovar (R39, R40, R37, R41b): estado aprovada com alertas aceitos e cópia do estoque; lista_aprovada; receitas novas no Livro
+  // Aprovar (R39, R40, R37, R41b): nunca barrada pelo checklist (ADR-028); estado aprovada com alertas e falhas aceitos e cópia do estoque; lista_aprovada; receitas novas no Livro
   function aprovar(inicio) {
     var w = E().semana(inicio), calc = E().calc(inicio);
     var alertas = (calc.checklist || []).filter(function (c) { return c.status === 'alerta' || c.status === 'manual'; }).map(function (c) { return c.id; });
+    var falhas = (calc.checklist || []).filter(function (c) { return c.status === 'falha'; }).map(function (c) { return c.id; });
     T.aprovando = inicio; App.ui.render(true);
     var cad = Promise.resolve();
     (w.sem.receitas_novas || []).forEach(function (r) {
@@ -6847,7 +6852,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       cad = cad.then(function () { return App.sync.enfileirar('livro_upsert', { receita: rec }); });
     });
     return cad.then(function () {
-      return App.ui.gravar('semana_estado', { inicio: inicio, de: w.estado, para: 'aprovada', alertas_aceitos: alertas, estoque_copia: P.estoqueDaSemana(), lista_aprovada: calc.lista }, 'entregas');
+      return App.ui.gravar('semana_estado', { inicio: inicio, de: w.estado, para: 'aprovada', alertas_aceitos: alertas, falhas_aceitos: falhas, estoque_copia: P.estoqueDaSemana(), lista_aprovada: calc.lista }, 'entregas');
     }).then(function () { T.aprovando = null; App.ui.ir('#entregas/' + inicio); });
   }
 
@@ -7933,8 +7938,9 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
 /* app/telas/revisar.js · Revisar e aprovar, passo 4 de 5 (LEIA.md §6 + M3/M4, SPEC §5). Rota #revisar.
  * Metas, falha com a correção (Pedrosa fora do prazo → "Sem Pedrosa nesta semana"), jantares com Trocar / Manter /
  * Pedir ajuste, cozimentos adiantados com data editável (tarefas_quando) e "na janela livre", conferência ao vivo.
- * Aprovar: falha bloqueia; alerta abre a folha da própria página "Aprovar com N alerta?" (M4, nunca confirm()).
- * Aprovar grava semana_estado = aprovada (alertas_aceitos, cópia do estoque R40), lista_aprovada (R41b) e as
+ * Aprovar nunca é bloqueada (ADR-028, K2a): o botão está sempre habilitado; com falha e/ou alerta abre a folha da própria página
+ * "Aprovar com N falhas e N alertas?" (M4, nunca confirm()), que lista os itens e tem "Voltar e revisar".
+ * Aprovar grava semana_estado = aprovada (alertas_aceitos, falhas_aceitos, cópia do estoque R40), lista_aprovada (R41b) e as
  * receitas novas do LLM no Livro (R37).
  * Sem template literal (crase).
  */
@@ -7990,11 +7996,11 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     }).join('') : '<p class="mut" style="margin:0">Sem cozimento antecipado</p>') + '<p class="foot-note">Datas sugeridas pelo motor. Mude a data de cada tarefa se precisar.</p></section>';
     h += '<h2 class="t">Conferência <small>ao vivo</small></h2><section class="card">' + K().conferenciaHTML(cl) + '</section>';
     var alertas = cl.filter(function (c) { return c.status === 'alerta' || c.status === 'manual'; });
+    var avisos = cs.f + alertas.length; // falha e alerta pedem a folha de confirmação; nada bloqueia
     if (res.tem) {
       h += '<div class="dock"><div class="in"><div class="sum">' + ic('txt') + '<span>' + esc(res.texto) + '</span></div><p class="small mut" style="margin:0 0 8px">Aprovar volta depois de aplicar os pedidos. ' + cs.html + '</p><button class="bt pri big full" data-acao="aplicar-pedidos" data-inicio="' + inicio + '" data-volta="#precardapio/resultado">Aplicar meus pedidos</button></div></div>';
     } else {
-      h += '<div class="dock"><div class="in"><div class="sum">' + cs.html + '</div>' + (cs.f ? '<button class="bt big full" disabled>Resolva ' + B.plural(cs.f, 'falha', 'falhas') + ' para aprovar</button>'
-        : '<button class="bt ok big full" data-acao="aprovar" data-inicio="' + inicio + '" data-n="' + alertas.length + '">' + ic('chk') + 'Aprovar a semana</button>') + '</div></div>';
+      h += '<div class="dock"><div class="in"><div class="sum">' + cs.html + '</div><button class="bt ok big full" data-acao="aprovar" data-inicio="' + inicio + '" data-n="' + avisos + '">' + ic('chk') + 'Aprovar a semana</button></div></div>';
     }
     return { nav: null, flow: true, html: h, temDado: true, titulo: 'Revisar', after: ligarSelects };
   };
@@ -8009,12 +8015,18 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   }
   App.acoes['rev-pedrosa'] = function (b) { App.ui.gravar('semana_patch', { inicio: App.planejar.alvo(), caminho: 'pedido_pedrosa', valor: b.getAttribute('data-v') === '1' }); };
   App.acoes.aprovar = function (b) {
-    var inicio = b.getAttribute('data-inicio'), n = +b.getAttribute('data-n');
-    if (!n) { App.planejar.aprovar(inicio); return; }
-    var cl = E().calc(inicio).checklist.filter(function (c) { return c.status === 'alerta' || c.status === 'manual'; });
-    var rot = 'Aprovar com ' + B.plural(n, 'alerta', 'alertas');
-    App.ui.abrirFolha('<h2 id="fl-t">' + rot + '?</h2><p class="lead">Alerta não impede a aprovação. Ele fica registrado na semana como aceito.</p><ul class="chk">' +
-      cl.map(function (c) { return '<li><span class="s"><span class="pill alerta">alerta</span></span><span>' + esc(c.texto) + '<small data-q="conferencia">' + esc(c.detalhe || '') + '</small></span></li>'; }).join('') + '</ul>' +
+    var inicio = b.getAttribute('data-inicio');
+    var ch = E().calc(inicio).checklist || [];
+    var fs = ch.filter(function (c) { return c.status === 'falha'; });
+    var as = ch.filter(function (c) { return c.status === 'alerta' || c.status === 'manual'; });
+    if (!fs.length && !as.length) { App.planejar.aprovar(inicio); return; } // sem aviso: aprova direto
+    // ADR-028: falha avisa e registra, nunca bloqueia; a folha conta os dois
+    var partes = []; if (fs.length) partes.push(B.plural(fs.length, 'falha', 'falhas')); if (as.length) partes.push(B.plural(as.length, 'alerta', 'alertas'));
+    var rot = 'Aprovar com ' + partes.join(' e ');
+    var lead = (fs.length ? (as.length ? 'Falha e alerta não impedem' : 'Falha não impede') : 'Alerta não impede') + ' a aprovação. ' + (fs.length + as.length > 1 ? 'Ficam registrados' : 'Fica registrado') + ' na semana como aceitos.';
+    function li(c, cls) { return '<li><span class="s"><span class="pill ' + cls + '">' + cls + '</span></span><span>' + esc(c.texto) + '<small data-q="conferencia">' + esc(c.detalhe || '') + '</small></span></li>'; }
+    App.ui.abrirFolha('<h2 id="fl-t">' + rot + '?</h2><p class="lead">' + lead + '</p><ul class="chk">' +
+      fs.map(function (c) { return li(c, 'falha'); }).join('') + as.map(function (c) { return li(c, 'alerta'); }).join('') + '</ul>' +
       '<div class="stack"><button class="bt ok big full" data-acao="aprovar-ok" data-inicio="' + inicio + '">' + ic('chk') + rot + '</button><button class="bt sec big full" data-acao="fechar-folha">Voltar e revisar</button></div>');
   };
   App.acoes['aprovar-ok'] = function (b) { App.ui.fecharFolha(); App.planejar.aprovar(b.getAttribute('data-inicio')); };
@@ -8022,7 +8034,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
 
 /* ===== app/telas/entregas.js ===== */
 /* app/telas/entregas.js · Entregas (LEIA.md §7, SPEC §5 Entregas; passo 5 de 5). Rota #entregas[/<inicio>].
- * Dado: a semana aprovada (aprovada_em, alertas_aceitos) e calcularSemana do motor (cardápio, lista, tarefas, receitas).
+ * Dado: a semana aprovada (aprovada_em, alertas_aceitos, falhas_aceitos) e calcularSemana do motor (cardápio, lista, tarefas, receitas).
  * Word: src/export-docx.js (CardapioDocx.gerarDocx, gerado no navegador, sem rede). Mensagem: nota editorial da semana
  * ou o rascunho do motor (rascunhoNotaEditorial). Lembretes no calendário: ainda não disponível.
  * Sem template literal (crase).
@@ -8053,11 +8065,12 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     if (!w) return { nav: null, flow: true, temDado: true, html: App.ui.flowTop(4, 'Entregas', null, '#semana') + App.ui.empty('cal', 'Nenhuma semana aprovada.', 'As entregas aparecem quando a semana é aprovada.', '<a class="bt pri big" href="#semana/proxima">Ver a próxima semana</a>') };
     var calc = E().calc(w.inicio), R = E().mapaRec();
     var h = App.ui.flowTop(4, 'Semana aprovada', w.inicio, '#semana' + (w.inicio > B.segundaDe(B.hojeIso()) ? '/proxima' : ''));
-    var ch = calc.checklist || [], aceitos = w.sem.alertas_aceitos || [];
+    var ch = calc.checklist || [], aceitos = w.sem.alertas_aceitos || [], falhasAceitas = w.sem.falhas_aceitos || [];
     var nF = ch.filter(function (c) { return c.status === 'falha'; }).length;
-    var txAceitos = aceitos.map(function (id) { var c = ch.filter(function (x) { return x.id === id; })[0]; return c ? c.texto : id; });
+    function textoDe(id) { var c = ch.filter(function (x) { return x.id === id; })[0]; return c ? c.texto : id; }
+    var txAceitos = aceitos.map(textoDe), txFalhas = falhasAceitas.map(textoDe);
     h += '<div class="stat"><span class="ico g">' + ic('chk') + '</span><div><h2>' + (w.sem.aprovada_em ? 'Aprovada às ' + B.horaTexto(w.sem.aprovada_em.replace(' ', 'T')) : 'Aprovada') + '</h2><p>' +
-      B.plural(nF, 'falha', 'falhas') + ' · ' + (aceitos.length ? B.plural(aceitos.length, 'alerta aceito', 'alertas aceitos') + ' (' + esc(txAceitos.join('; ')) + ')' : 'nenhum alerta aceito') + '</p></div></div>';
+      (falhasAceitas.length ? B.plural(falhasAceitas.length, 'falha aceita', 'falhas aceitas') + ' (' + esc(txFalhas.join('; ')) + ')' : B.plural(nF, 'falha', 'falhas')) + ' · ' + (aceitos.length ? B.plural(aceitos.length, 'alerta aceito', 'alertas aceitos') + ' (' + esc(txAceitos.join('; ')) + ')' : 'nenhum alerta aceito') + '</p></div></div>';
     function dv(href, icn, cor, b, s) {
       var ini = href ? '<a class="deliv" href="' + href + '">' : '<div class="deliv">';
       return ini + '<span class="ico" style="background:' + cor + '">' + ic(icn) + '</span><span class="grow"><b>' + b + '</b><small>' + s + '</small></span>' + (href ? ic('right') + '</a>' : '</div>');
@@ -8741,6 +8754,9 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       // TELA-B (onda G1 08/10): casos novos da frente TELA-B (login com sessão, fila, estoque por texto, hora com fuso, Compras)
       return App.autoteste.faseTelaB ? App.autoteste.faseTelaB({ ok: ok, ir: ir, ate: ate, esperar: esperar, clicar: clicar, texto: texto, $: $, $$: $$, pill: pill, semanaServidor: semanaServidor, configServidor: configServidor }) : null;
     }).then(function () {
+      // K2a (BACKLOG 151, ADR-028): falha do checklist avisa e registra; nunca bloqueia a aprovação
+      return App.autoteste.faseK2a ? App.autoteste.faseK2a({ ok: ok, ir: ir, ate: ate, esperar: esperar, clicar: clicar, texto: texto, $: $, $$: $$, semanaServidor: semanaServidor }) : null;
+    }).then(function () {
       // H10: motor recalculando a semana no aparelho
       var w = App.estado.semanaDeHoje(), dados = App.estado.calc(w.inicio).dados, tempos = [];
       for (var i = 0; i < 20; i++) { var a = performance.now(); root.CardapioMotor.calcularSemana(w.sem, dados); tempos.push(performance.now() - a); }
@@ -9176,7 +9192,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       try {
         com({ '2026-10-05': A(true) }, function () { var sm = P.esqueleto('2026-10-12'), c = E().calc('2026-10-12', sm); st = (c.checklist || []).filter(function (x) { return x.id === 'pedrosa_antecedencia'; })[0]; });
       } catch (e) { st = { status: 'erro: ' + e.message }; }
-      ok(!!st && st.status !== 'falha' && st.status !== undefined && String(st.status).indexOf('erro') !== 0, 'D6: semana criada depois da quarta com os padrões não gera a falha do Pedrosa que bloqueia a aprovação', st && { status: st.status, detalhe: st.detalhe });
+      ok(!!st && st.status !== 'falha' && st.status !== undefined && String(st.status).indexOf('erro') !== 0, 'D6: semana criada depois da quarta com os padrões não gera a falha do Pedrosa (a falha só avisa, ADR-028; o padrão certo nem a cria)', st && { status: st.status, detalhe: st.detalhe });
     }).then(function () {
       // D11 · o rótulo da mensagem à nutricionista diz de quem é o texto: IA (com "confira antes de enviar") ou motor
       var pa = E().semanas().filter(function (w) { return E().aprovada(w); })[0], orig = E().semana, tx = {};
@@ -9431,6 +9447,101 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
         }).then(function () { return ir('#estoque'); }).then(function () {
           ok(L.estado !== 'erro' && !/Não consegui ler/.test(texto('#main')), T + 'D4: depois de navegar para outra tela e voltar, o erro não está mais lá', { estado: L.estado });
           L.estado = null; L.texto = false; L.itens = [];
+        });
+      });
+    });
+  };
+})(this);
+
+/* ---------- K2a (BACKLOG 151, ADR-028): falha do checklist avisa, nunca bloqueia ---------- */
+/* Reabre a semana aprovada do roteiro (aprovada -> em_revisao é reabrir) e aprova de novo com o checklist forçado:
+ * 2 falhas + 1 alerta (ids reais do motor) e, no 2º caso, tudo ok. O resto da tela é o real. */
+(function (root) {
+  'use strict';
+  var App = root.App;
+  if (!App.config || !App.config.AUTOTESTE) return;
+  var C = root.CONTRATO, B = App.base;
+  App.autoteste.faseK2a = function (h) {
+    var ok = h.ok, ir = h.ir, ate = h.ate, esperar = h.esperar, clicar = h.clicar, texto = h.texto, $ = h.$, $$ = h.$$, sem = h.semanaServidor;
+    var E = function () { return App.estado; }, T = 'K2a ';
+    var seg = B.segundaDe(B.hojeIso()), prox = B.somarDias(seg, 7), calc0 = null;
+    var FALHAS = ['leguminosas_3_dias', 'folhas_todo_dia'], ALERTA = 'estoque_descontado';
+    function fila0() { return App.sync.pendentes() === 0 && App.sync.st.estado !== 'enviando'; }
+    function forcar(comAviso) {
+      calc0 = E().calc;
+      E().calc = function (i, x) {
+        var c = calc0.apply(this, arguments);
+        if (i !== prox || x) return c;
+        var cl = (c.checklist || []).map(function (it) {
+          var n = Object.assign({}, it);
+          if (comAviso && FALHAS.indexOf(n.id) >= 0) { n.status = 'falha'; n.detalhe = 'Falha forçada pelo autoteste.'; }
+          else if (comAviso && n.id === ALERTA) { n.status = 'alerta'; n.detalhe = 'Alerta forçado pelo autoteste.'; }
+          else if (n.status === 'falha' || n.status === 'alerta' || n.status === 'manual') n.status = 'ok';
+          return n;
+        });
+        return Object.assign({}, c, { checklist: cl });
+      };
+    }
+    function soltar() { if (calc0) { E().calc = calc0; calc0 = null; } }
+    function reabrir() {
+      return App.planejar.transitar(prox, 'em_revisao').then(function () { return ate(function () { return fila0() && sem(prox).estado === 'em_revisao'; }, 6000); });
+    }
+    function caso(nome, fn) {
+      return Promise.resolve().then(fn).catch(function (e) { soltar(); ok(false, T + nome + ': o caso quebrou', String(e && (e.stack || e.message) || e).slice(0, 240)); });
+    }
+
+    return caso('2 falhas e 1 alerta', function () {
+      return reabrir().then(function (v) {
+        ok(v, T + 'a semana aprovada reabre em em_revisao (aprovada -> em_revisao)', sem(prox) && sem(prox).estado);
+        forcar(true);
+        return ir('#revisar').then(function () { App.ui.render(true); return esperar(100); });
+      }).then(function () {
+        ok(App.planejar.alvo() === prox, T + 'o Revisar abre a semana reaberta', App.planejar.alvo());
+        var bt = $('[data-acao="aprovar"]');
+        ok(!!bt && !bt.disabled && /Aprovar a semana/.test(texto(bt)), T + 'com 2 falhas o botão "Aprovar a semana" está habilitado', texto('.dock'));
+        ok(!/Resolva/.test(texto('.dock')) && !$('.dock button[disabled]'), T + 'nenhum botão desabilitado nem "Resolva N falhas" no rodapé', texto('.dock'));
+        ok(/2 falhas/.test(texto('.dock .sum')) && $$('div.card .row .pill.falha').length === 2, T + 'as falhas seguem em vermelho: chip "2 falhas" e um cartão "falha" por item', texto('.dock .sum'));
+        clicar(bt);
+        return esperar(200);
+      }).then(function () {
+        ok(!!$('.sheet') && texto('.sheet h2') === 'Aprovar com 2 falhas e 1 alerta?', T + 'a folha diz "Aprovar com 2 falhas e 1 alerta?"', texto('.sheet h2'));
+        var lis = $$('.sheet .chk li');
+        ok(lis.length === 3 && $$('.sheet .pill.falha').length === 2 && $$('.sheet .pill.alerta').length === 1, T + 'a folha lista as 3 linhas (2 falhas, 1 alerta)', lis.length);
+        ok(/Leguminosas em pelo menos 3 dias\?/.test(texto('.sheet')) && /Folhas verde-escuras todos os dias\?/.test(texto('.sheet')), T + 'a folha traz o texto de cada falha', texto('.sheet').slice(0, 160));
+        ok(!!$('.sheet [data-acao="fechar-folha"]') && /Voltar e revisar/.test(texto('.sheet [data-acao="fechar-folha"]')), T + 'a folha tem "Voltar e revisar"');
+        clicar('.sheet [data-acao="fechar-folha"]');
+        return esperar(250);
+      }).then(function () {
+        ok(!$('.sheet') && sem(prox).estado === 'em_revisao', T + '"Voltar e revisar" fecha a folha e não aprova', sem(prox).estado);
+        clicar('[data-acao="aprovar"]');
+        return esperar(200);
+      }).then(function () {
+        clicar('.sheet [data-acao="aprovar-ok"]');
+        return ate(function () { return root.location.hash.indexOf('#entregas') === 0 && fila0() && sem(prox).estado === 'aprovada'; }, 8000);
+      }).then(function (v) {
+        var s = sem(prox) || {};
+        ok(v && s.aprovada_por === 'tobia' && !!s.aprovada_em, T + 'confirmar na folha aprova a semana com falha (sem transicao_invalida)', { estado: s.estado, por: s.aprovada_por });
+        ok(JSON.stringify((s.falhas_aceitos || []).slice().sort()) === JSON.stringify(FALHAS.slice().sort()), T + 'a semana grava falhas_aceitos com as 2 falhas', s.falhas_aceitos);
+        ok(JSON.stringify(s.alertas_aceitos) === JSON.stringify([ALERTA]), T + 'e alertas_aceitos com o alerta', s.alertas_aceitos);
+        var st = texto('.stat');
+        ok(/2 falhas aceitas/.test(st) && /Leguminosas em pelo menos 3 dias\?/.test(st) && /Folhas verde-escuras todos os dias\?/.test(st) && /1 alerta aceito/.test(st), T + 'Entregas mostra as falhas aceitas com o texto de cada uma, e o alerta', st);
+        soltar();
+      });
+    }).then(function () {
+      return caso('sem falha nem alerta', function () {
+        return reabrir().then(function () {
+          forcar(false);
+          return ir('#revisar').then(function () { App.ui.render(true); return esperar(100); });
+        }).then(function () {
+          var bt = $('[data-acao="aprovar"]');
+          ok(!!bt && !bt.disabled, T + 'sem falha nem alerta o botão segue habilitado', texto('.dock'));
+          clicar(bt);
+          return ate(function () { return root.location.hash.indexOf('#entregas') === 0 && fila0() && sem(prox).estado === 'aprovada'; }, 8000);
+        }).then(function (v) {
+          var s = sem(prox) || {};
+          ok(v && !$('.sheet'), T + 'sem falha nem alerta aprova direto, sem folha', { estado: s.estado });
+          ok(JSON.stringify(s.falhas_aceitos) === '[]' && JSON.stringify(s.alertas_aceitos) === '[]', T + '... e grava as duas listas vazias', { f: s.falhas_aceitos, a: s.alertas_aceitos });
+          soltar();
         });
       });
     });
