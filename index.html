@@ -1099,7 +1099,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     // saiu do contrato (com as 4 funções ela não barraria nada); GEMINI_PAGO e Config.gemini_pago seguem como informação de limite e
     // de termos (custo 0 no gratuito), nunca como permissão.
 
-    ERROS: ['desligado', 'sem_chave', 'provedor_nao_aprovado', 'tempo', 'limite', 'recusa', 'esquema', 'rede', 'provedor'],
+    ERROS: ['desligado', 'sem_chave', 'chave_recusada', 'provedor_nao_aprovado', 'tempo', 'limite', 'recusa', 'esquema', 'rede', 'provedor'],
     // US$ por milhão de tokens [entrada, saída] · fonte: skill claude-api (tabela de 24/06/2026) e working/pesquisa-llms.md (26/09/2026)
     PRECOS_USD_MTOK: { 'claude-sonnet-5': [2, 10], 'claude-haiku-4-5': [1, 5], 'gemini-flash-lite': [0.25, 1.5], 'gemini-3.5-flash-lite': [0.30, 2.50] }, // 3.5: ai.google.dev/gemini-api/docs/pricing (A1, 26/09)
     LIMITE_CELULA: 45000, // caracteres por célula json; o Sheets corta em 50000 · acima disso o servidor recusa (erro entrada_invalida), nunca trunca
@@ -6012,8 +6012,16 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     var h = semanaDeHoje(); return h && h.estado !== 'fechada' && h.estado !== 'arquivada' ? h : null;
   }
   // a semana em planejamento (estados antes da aprovação)
+  // K1/H1 (18/11/2026): semana parada em planejamento ou revisão cuja segunda já passou há MAIS de 7 dias está "vencida": não é mais a
+  // semana em planejamento (senão uma semana esquecida prende a tela e o alvo do planejamento). Só na leitura: o dado da família não muda
+  // e o estado dela segue o do contrato; ela continua em semanas().
+  var ANTES_DA_APROVACAO = ['estoque', 'pre_cardapio', 'em_revisao'];
+  var DIAS_DE_FOLGA = 7;
+  function semanaVencida(w) {
+    return !!w && ANTES_DA_APROVACAO.indexOf(w.estado) >= 0 && B().hojeIso() > B().somarDias(w.inicio, DIAS_DE_FOLGA);
+  }
   function semanaEmPlanejamento() {
-    return semanas().filter(function (w) { return ['estoque', 'pre_cardapio', 'em_revisao'].indexOf(w.estado) >= 0; })[0] || null;
+    return semanas().filter(function (w) { return ANTES_DA_APROVACAO.indexOf(w.estado) >= 0 && !semanaVencida(w); })[0] || null;
   }
 
   // cálculo completo do motor para uma semana (panela, lista, metas, checklist, preparo, dias)
@@ -6042,7 +6050,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
   App.estado = {
     linhas: linhas, config: config, regras: regras, ingredientes: ingredientes, mapaIng: mapaIng, livro: livro, mapaRec: mapaRec, lanches: lanches,
     dadosMotor: dadosMotor, semanas: semanas, semana: semana, semanaDeHoje: semanaDeHoje, semanaDoDia: semanaDoDia, proximaSegunda: proximaSegunda,
-    semanaDaCompra: semanaDaCompra, semanaEmPlanejamento: semanaEmPlanejamento, aprovada: aprovada,
+    semanaDaCompra: semanaDaCompra, semanaEmPlanejamento: semanaEmPlanejamento, semanaVencida: semanaVencida, aprovada: aprovada,
     calc: calc, preferencias: preferencias, juliaFator: juliaFator, estoqueVivo: estoqueVivo, movimentos: movimentos, llmLog: llmLog
   };
 })(this);
@@ -6658,6 +6666,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       limite: 'A resposta do ' + nome + ' ficou grande demais.',
       tempo: 'O ' + nome + ' não respondeu.', rede: 'O ' + nome + ' não respondeu.',
       sem_chave: 'Falta a chave do ' + nome + ' no servidor.',
+      chave_recusada: 'A chave do ' + nome + ' foi recusada (vencida ou sem crédito).',
       recusa: 'O ' + nome + ' recusou montar esta semana.',
       esquema: 'A resposta do ' + nome + ' veio fora do formato esperado.',
       desligado: 'Montar com o ' + nome + ' está desligado no Config.',
@@ -9097,7 +9106,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       // D2 · motivo pelo código da falha
       S.latencia_llm = 50;
       var casos = [['limite', /A resposta do Claude ficou grande demais\. Montei com o motor\./], ['tempo', /O Claude não respondeu\./], ['rede', /O Claude não respondeu\./],
-        ['sem_chave', /Falta a chave do Claude no servidor\./], ['recusa', /O Claude recusou montar esta semana\./], ['esquema', /A resposta do Claude veio fora do formato esperado\./], ['desligado', /Montar com o Claude está desligado/]];
+        ['sem_chave', /Falta a chave do Claude no servidor\./], ['chave_recusada', /A chave do Claude foi recusada \(vencida ou sem crédito\)\. Montei com o motor\./], ['recusa', /O Claude recusou montar esta semana\./], ['esquema', /A resposta do Claude veio fora do formato esperado\./], ['desligado', /Montar com o Claude está desligado/]];
       var difs = [];
       return casos.reduce(function (p, c) {
         return p.then(function () {
@@ -9107,7 +9116,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
         });
       }, Promise.resolve()).then(function () {
         S.llm_falha = null;
-        ok(!difs.length, 'D2: a falha da IA diz o motivo pelo código (limite, tempo, rede, sem_chave, recusa, esquema, desligado)', difs.join(' | '));
+        ok(!difs.length, 'D2: a falha da IA diz o motivo pelo código (limite, tempo, rede, sem_chave, chave_recusada, recusa, esquema, desligado)', difs.join(' | '));
       });
     }).then(function () {
       // D2 · "Outra proposta" com a IA falhando: não gasta uma das 3, o motor entra com a semente da proposta e a tela explica
@@ -9200,6 +9209,18 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
         r.pedida = P.alvo();
       } finally { B.hojeIso = hojeO; E().semanaEmPlanejamento = planO; }
       ok(r.segunda === '2026-11-09' && r.quarta === '2026-11-09' && r.pedida === '2026-11-02', 'D12: na segunda e na quarta o planejamento abre a próxima semana (09/11); a semana desta segunda só se a pessoa a criou', r);
+    }).then(function () {
+      // K1/H1 · semana parada em revisão há mais de 7 dias não prende o planejamento: as funções REAIS (sem dublê), só o relógio muda
+      var hojeK = B.hojeIso, k = {};
+      try {
+        k.emRevisao = E().semanas().filter(function (w) { return w.estado === 'em_revisao'; }).length;
+        B.hojeIso = function () { return '2026-11-18'; };
+        k.emPlanejamento = (E().semanaEmPlanejamento() || {}).inicio || null;
+        k.alvo = P.alvo();
+        k.antesDoRelogio = E().semanas().length;
+      } finally { B.hojeIso = hojeK; }
+      ok(k.emPlanejamento === null && k.alvo === '2026-11-23' && E().semanas().length === k.antesDoRelogio,
+        'K1/H1: com hoje = 18/11, nenhuma semana velha parada em planejamento ou revisão é "a semana em planejamento" e o planejamento abre a de 23/11 (a semana velha segue na cópia, intacta)', k);
     }).then(function () {
       // D16 · nenhum jargão interno de projeto ("onda 2c", "não existe no motor") nas telas Entregas e Revisar
       var d = root.document.createElement('div'), pa = E().semanas().filter(function (w) { return E().aprovada(w); })[0];
