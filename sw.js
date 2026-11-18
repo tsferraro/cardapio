@@ -1,6 +1,6 @@
 /* sw.js · gerado por build_v2.py. Abre o app sem rede: rede primeiro, cópia em cache se a rede falhar.
  * Só GET do próprio site; a API (script.google.com) e o login do Google nunca passam pelo cache. */
-var CACHE = 'cardapio-v2-936eb4cf5f2e';
+var CACHE = 'cardapio-v2-f86c05172825';
 var ARQUIVOS = ['./', 'index.html', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', function (e) { e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(ARQUIVOS); }).then(function () { return self.skipWaiting(); })); });
 self.addEventListener('activate', function (e) {

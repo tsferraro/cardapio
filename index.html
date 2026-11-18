@@ -6400,7 +6400,7 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     var ctrlCls = opts.trocar ? 'ctrl' : 'ctrl c2';
     var h = '<div class="' + ctrlCls + '">' + (opts.trocar ? '<button class="cbt" data-acao="trocar-abrir" data-inicio="' + w.inicio + '" data-dia="' + id + '" aria-expanded="' + !!opts.trocando + '">' + ic('swap') + 'Trocar</button>' : '') +
       '<button class="cbt" aria-pressed="' + lk + '" data-acao="manter" data-inicio="' + w.inicio + '" data-dia="' + id + '">' + ic('lock') + (lk ? 'Mantido' : 'Manter') + '</button>' +
-      '<button class="cbt' + (tem && !lk ? ' has' : '') + '" aria-expanded="' + aberto + '" aria-controls="pb-' + id + '" data-acao="pedido-abrir" data-inicio="' + w.inicio + '" data-dia="' + id + '"' + (lk ? ' disabled' : '') + '>' + ic('txt') + (tem ? 'Pedido feito' : 'Pedir ajuste') + '</button></div>';
+      '<button class="cbt' + (tem && !lk ? ' has' : '') + '" aria-expanded="' + aberto + '" aria-controls="pb-' + id + '" data-acao="pedido-abrir" data-inicio="' + w.inicio + '" data-dia="' + id + '">' + ic('txt') + (tem ? 'Pedido feito' : 'Pedir ajuste') + '</button></div>';
     if (aberto) {
       var at = (p && p.atalhos) || [];
       h += '<div class="pedbox" id="pb-' + id + '"><b>O que mudar ' + B().NA_DIA[id] + '?</b><span class="small mut">Vale para o jantar e para a marmita que ele rende. Os outros dias não mudam.</span>' +
@@ -6441,7 +6441,12 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
     var inicio = b.getAttribute('data-inicio'), id = b.getAttribute('data-dia'), w = E().semana(inicio), lk = !!(w.sem.dias_travados || {})[id];
     App.ui.gravar('semana_patch', { inicio: inicio, caminho: 'dias_travados.' + id, valor: lk ? null : true });
   };
-  App.acoes['pedido-abrir'] = function (b) { var k = b.getAttribute('data-inicio') + b.getAttribute('data-dia'); ABERTO[k] = !ABERTO[k]; App.ui.render(true); };
+  // BACKLOG 155: o botão nunca fica desabilitado; num dia "Mantido" o toque solta o Manter (o pedido só vale para dia não mantido) e abre a caixa
+  App.acoes['pedido-abrir'] = function (b) {
+    var inicio = b.getAttribute('data-inicio'), id = b.getAttribute('data-dia'), k = inicio + id, w = E().semana(inicio);
+    if (w && w.sem && (w.sem.dias_travados || {})[id]) { ABERTO[k] = true; App.ui.gravar('semana_patch', { inicio: inicio, caminho: 'dias_travados.' + id, valor: null }); return; }
+    ABERTO[k] = !ABERTO[k]; App.ui.render(true);
+  };
   App.acoes['pedido-atalho'] = function (b) {
     var a = b.getAttribute('data-at');
     gravarPedido(b.getAttribute('data-inicio'), b.getAttribute('data-dia'), function (p) { var i = p.atalhos.indexOf(a); if (i >= 0) p.atalhos.splice(i, 1); else p.atalhos.push(a); });
@@ -8864,6 +8869,18 @@ var MASSA_FALSA = {"regras":{"versao":"regras-ficticio-v1","atualizado_em":"2026
       return esperar(150);
     }).then(function () {
       ok(!!$('#pb-ter') && /O que mudar na terça\?/.test(texto('#pb-ter')), 'M3: "Pedir ajuste" abre a caixa do dia');
+      // BACKLOG 155: dia Mantido não desabilita o "Pedir ajuste"; tocar solta o Manter e abre a caixa
+      clicar('[data-acao="manter"][data-dia="qua"]');
+      return ate(function () { return fila0() && (sem(prox).dias_travados || {}).qua === true; }, 5000);
+    }).then(function () {
+      var bq = $('[data-acao="pedido-abrir"][data-dia="qua"]');
+      ok(!!bq && !bq.disabled && !bq.hasAttribute('disabled'), 'dia mantido: Pedir ajuste habilitado', bq && bq.outerHTML.slice(0, 120));
+      clicar('[data-acao="pedido-abrir"][data-dia="qua"]');
+      return ate(function () { return fila0() && !(sem(prox).dias_travados || {}).qua && !!$('#pb-qua'); }, 5000);
+    }).then(function (v) {
+      ok(v && /Manter/.test(texto('[data-acao="manter"][data-dia="qua"]')) && !/Mantido/.test(texto('[data-acao="manter"][data-dia="qua"]')), 'dia mantido: tocar em Pedir ajuste solta o Manter e abre a caixa', texto('[data-acao="manter"][data-dia="qua"]'));
+      return null;
+    }).then(function () {
       clicar('[data-acao="pedido-atalho"][data-dia="ter"][data-at="peixe"]');
       return ate(function () { var p = (sem(prox).pedidos || {}).ter; return fila0() && p && p.atalhos.indexOf('peixe') >= 0; }, 5000);
     }).then(function (v) {
